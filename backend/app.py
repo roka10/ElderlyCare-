@@ -1,14 +1,18 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, Response
 from flask_jwt_extended import JWTManager
 from flask_socketio import SocketIO, send
+from flask_cors import CORS
 from models import db
 from config import Config
 from routes.auth import auth_bp
 from routes.main import main_bp
 import os
+import cv2
 
 app = Flask(__name__)
 app.config.from_object(Config)
+
+CORS(app)
 
 db.init_app(app)
 jwt = JWTManager(app)
@@ -21,6 +25,23 @@ app.register_blueprint(main_bp, url_prefix='/api')
 @app.route('/')
 def index():
     return "Human Activity Monitoring Backend is Running!"
+
+camera = cv2.VideoCapture(0)
+
+def generate_frames():
+    while True:
+        success, frame = camera.read()
+        if not success:
+            break
+        else:
+            ret, buffer = cv2.imencode('.jpg', frame)
+            frame = buffer.tobytes()
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+
+@app.route('/video_feed')
+def video_feed():
+    return Response(generate_frames(), mimetype = 'multipart/x-mixed-replace; boundary=frame')
 
 @socketio.on('connect')
 def test_connect():

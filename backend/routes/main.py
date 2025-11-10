@@ -1,14 +1,14 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from flask_socketio import emit
 from models import db, DetectionEvent
-from app import socketio # Import socketio from the main app instance
 
 main_bp = Blueprint('main', __name__)
 
 @main_bp.route('/events', methods=['POST'])
-@jwt_required() # Protect this endpoint for authorized detection modules
+@jwt_required()
 def receive_event():
+    from app import socketio  # ✅ moved import inside the function to break circular dependency
+    
     data = request.get_json()
     
     # Validate incoming data
@@ -18,7 +18,7 @@ def receive_event():
 
     new_event = DetectionEvent(
         event_type=data['event_type'],
-        timestamp=data['timestamp'], # You might need to parse this string to datetime object
+        timestamp=data['timestamp'],
         face_name=data.get('face_name'),
         emotion=data.get('emotion'),
         confidence=data.get('confidence'),
@@ -31,6 +31,7 @@ def receive_event():
     socketio.emit('new_detection_event', data)
 
     return jsonify({"msg": "Event received successfully"}), 201
+
 
 @main_bp.route('/history', methods=['GET'])
 @jwt_required()
@@ -48,6 +49,7 @@ def get_history():
             'frame_path': event.frame_path
         })
     return jsonify(output), 200
+
 
 # Endpoint to stream live frames (if you choose to send processed frames back)
 # This is an alternative to sending only events, more bandwidth intensive
