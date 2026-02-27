@@ -5,22 +5,31 @@ from datetime import datetime
 import urllib.request
 import pickle
 import time
-import tensorflow as tf
-from tensorflow.keras.applications import EfficientNetB0, VGG19
-from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
-from tensorflow.keras.models import Model
 import warnings
 
 warnings.filterwarnings('ignore')
+
+# ── TensorFlow — optional, graceful degradation if DLL is broken ──────────────
+try:
+    import tensorflow as tf
+    from tensorflow.keras.applications import EfficientNetB0, VGG19
+    from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
+    from tensorflow.keras.models import Model
+    TENSORFLOW_AVAILABLE = True
+    print("TensorFlow loaded successfully.")
+except (ImportError, OSError) as _tf_err:
+    TENSORFLOW_AVAILABLE = False
+    tf = None
+    print(f"[WARNING] TensorFlow unavailable: {_tf_err}")
+    print("Emotion detection will be disabled. Backend will still run with motion + fall detection.")
 
 try:
     import face_recognition
     FACE_RECOGNITION_AVAILABLE = True
     print("Face recognition library found and imported successfully!")
-except ImportError:
+except (ImportError, OSError):
     FACE_RECOGNITION_AVAILABLE = False
-    print("Face recognition library not found. Install with: pip install face_recognition")
-    print("Continuing without face identification capabilities...")
+    print("Face recognition library not found. Continuing without face identification.")
 
 class FaceEmotionRecognizer:
     def __init__(self, model_type="efficientnet"):
@@ -50,6 +59,10 @@ class FaceEmotionRecognizer:
         self.fall_threshold_aspect_ratio = 1.8 # Ratio of width/height for horizontal bounding box
 
     def build_and_load_emotion_model(self):
+        if not TENSORFLOW_AVAILABLE:
+            print("[Emotion Model] TensorFlow not available — emotion detection disabled.")
+            return False
+
         model_filename = f"{self.model_type}_emotion_model.h5"
         model_path = os.path.join(self.model_dir, model_filename)
 
@@ -87,8 +100,11 @@ class FaceEmotionRecognizer:
             print("Note: This model needs to be trained or fine-tuned with emotion data")
             print("Using pre-initialized weights for transfer learning")
 
-            self.emotion_model.save(model_path)
-            print(f"Saved {self.model_type.upper()} model to {model_path}")
+            try:
+                self.emotion_model.save(model_path)
+                print(f"Saved {self.model_type.upper()} model to {model_path}")
+            except Exception as save_err:
+                print(f"[WARNING] Could not cache model to disk: {save_err}. Model still active in memory.")
 
             return True
         except Exception as e:
@@ -121,8 +137,8 @@ class FaceEmotionRecognizer:
             return False
 
         if not self.build_and_load_emotion_model():
-            print(f"Error with {self.model_type.upper()} emotion model.")
-            return False
+            print(f"[WARNING] Emotion model unavailable. Motion + fall detection still active.")
+            # Don't return False — continue loading cascade and face recognition
 
         if self.face_recognition_available:
             print("Face recognition is enabled and ready to use!")
@@ -209,6 +225,8 @@ class FaceEmotionRecognizer:
         return True
 
     def detect_emotion(self, face_img):
+        if not TENSORFLOW_AVAILABLE or self.emotion_model is None:
+            return "N/A", 0.0
         if not self.model_loaded:
             return "Unknown", 0.0
 

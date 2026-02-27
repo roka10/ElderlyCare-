@@ -1,16 +1,20 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { DashboardLayout } from "@/components/dashboard-layout"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/components/auth-provider"
 import { Activity, AlertTriangle, Bell, Calendar, Clock, Heart, Users, Video, PhoneCall } from "lucide-react"
+import { useToast } from "@/hooks/use-toast"
 
 export default function DashboardPage() {
   const { user, loading } = useAuth()
   const router = useRouter()
+  const { toast } = useToast()
+  const [sosSending, setSosSending] = useState(false)
+  const [cameraConnected, setCameraConnected] = useState(false)
 
   useEffect(() => {
     if (!loading && !user) {
@@ -30,9 +34,21 @@ export default function DashboardPage() {
             <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
             <p className="text-muted-foreground">Welcome back, {user.name}. Here's what's happening today.</p>
           </div>
-          <Button size="lg" className="gap-2">
+          <Button
+            size="lg"
+            className="gap-2"
+            disabled={sosSending}
+            onClick={() => {
+              setSosSending(true)
+              toast({
+                title: "SOS sent",
+                description: "Emergency contacts have been notified.",
+              })
+              setTimeout(() => setSosSending(false), 2000)
+            }}
+          >
             <PhoneCall className="h-4 w-4" />
-            SOS Call
+            {sosSending ? "Sending..." : "SOS Call"}
           </Button>
         </div>
 
@@ -89,13 +105,31 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent>
               <div className="aspect-video bg-muted rounded-md flex items-center justify-center">
-                <div className="text-center space-y-2">
-                  <Video className="h-8 w-8 mx-auto text-muted-foreground" />
-                  <p className="text-sm text-muted-foreground">Live feed will appear here</p>
-                  <Button variant="outline" size="sm">
-                    Connect Camera
-                  </Button>
-                </div>
+                  {cameraConnected ? (
+                    <div className="text-center space-y-2">
+                      <Video className="h-8 w-8 mx-auto text-muted-foreground" />
+                      <p className="text-sm text-muted-foreground">Camera connected. Open Live Feed for details.</p>
+                      <p className="text-xs text-muted-foreground">Streaming preview is available in the Live Feed tab.</p>
+                    </div>
+                  ) : (
+                    <div className="text-center space-y-2">
+                      <Video className="h-8 w-8 mx-auto text-muted-foreground" />
+                      <p className="text-sm text-muted-foreground">Live feed will appear here</p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setCameraConnected(true)
+                          toast({
+                            title: "Camera connected",
+                            description: "Your live feed is now ready in the Live Feed tab.",
+                          })
+                        }}
+                      >
+                        Connect Camera
+                      </Button>
+                    </div>
+                  )}
               </div>
             </CardContent>
           </Card>

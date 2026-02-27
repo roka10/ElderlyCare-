@@ -1,0 +1,10 @@
+Flask
+Flask-SQLAlchemy
+Flask-JWT-Extended
+Flask-SocketIO
+Flask-Cors
+opencv-contrib-python
+numpy==1.26.4
+werkzeug
+supabase
+python-dotenv

@@ -21,60 +21,184 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
+import { useToast } from "@/hooks/use-toast"
+
+type Reminder = {
+  id: number
+  title: string
+  description: string
+  time: string
+  frequency: string
+  alexa: boolean
+  completed: boolean
+  date?: string
+}
+
+const initialReminders: Reminder[] = [
+  {
+    id: 1,
+    title: "Blood Pressure Medication",
+    description: "Take 1 pill with water",
+    time: "9:00 AM",
+    frequency: "Daily",
+    alexa: true,
+    completed: true,
+  },
+  {
+    id: 2,
+    title: "Heart Medication",
+    description: "Take 1 pill after lunch",
+    time: "1:00 PM",
+    frequency: "Daily",
+    alexa: true,
+    completed: false,
+  },
+  {
+    id: 3,
+    title: "Evening Medication",
+    description: "Take 1 pill before dinner",
+    time: "6:00 PM",
+    frequency: "Daily",
+    alexa: true,
+    completed: false,
+  },
+  {
+    id: 4,
+    title: "Doctor Appointment",
+    description: "Checkup with Dr. Johnson",
+    time: "3:30 PM",
+    frequency: "Once",
+    date: "Tomorrow",
+    alexa: true,
+    completed: false,
+  },
+  {
+    id: 5,
+    title: "Physical Therapy",
+    description: "Gentle stretching exercises",
+    time: "10:00 AM",
+    frequency: "Weekly",
+    date: "Every Monday",
+    alexa: true,
+    completed: false,
+  },
+]
 
 export default function RemindersPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [isAddingReminder, setIsAddingReminder] = useState(false)
+  const [reminders, setReminders] = useState<Reminder[]>(initialReminders)
+  const [editingReminderId, setEditingReminderId] = useState<number | null>(null)
+  const [title, setTitle] = useState("")
+  const [description, setDescription] = useState("")
+  const [time, setTime] = useState("")
+  const [frequency, setFrequency] = useState("once")
+  const [date, setDate] = useState("")
+  const [alexaEnabled, setAlexaEnabled] = useState(true)
+  const { toast } = useToast()
 
-  const reminders = [
-    {
-      id: 1,
-      title: "Blood Pressure Medication",
-      description: "Take 1 pill with water",
-      time: "9:00 AM",
-      frequency: "Daily",
-      alexa: true,
-      completed: true,
-    },
-    {
-      id: 2,
-      title: "Heart Medication",
-      description: "Take 1 pill after lunch",
-      time: "1:00 PM",
-      frequency: "Daily",
-      alexa: true,
-      completed: false,
-    },
-    {
-      id: 3,
-      title: "Evening Medication",
-      description: "Take 1 pill before dinner",
-      time: "6:00 PM",
-      frequency: "Daily",
-      alexa: true,
-      completed: false,
-    },
-    {
-      id: 4,
-      title: "Doctor Appointment",
-      description: "Checkup with Dr. Johnson",
-      time: "3:30 PM",
-      frequency: "Once",
-      date: "Tomorrow",
-      alexa: true,
-      completed: false,
-    },
-    {
-      id: 5,
-      title: "Physical Therapy",
-      description: "Gentle stretching exercises",
-      time: "10:00 AM",
-      frequency: "Weekly",
-      date: "Every Monday",
-      alexa: true,
-      completed: false,
-    },
-  ]
+  const resetForm = () => {
+    setTitle("")
+    setDescription("")
+    setTime("")
+    setFrequency("once")
+    setDate("")
+    setAlexaEnabled(true)
+    setEditingReminderId(null)
+  }
+
+  const openAddDialog = () => {
+    resetForm()
+    setIsAddingReminder(true)
+  }
+
+  const openEditDialog = (reminder: Reminder) => {
+    setEditingReminderId(reminder.id)
+    setTitle(reminder.title)
+    setDescription(reminder.description)
+    setTime(reminder.time)
+    setFrequency(reminder.frequency)
+    setDate(reminder.date ?? "")
+    setAlexaEnabled(reminder.alexa)
+    setIsAddingReminder(true)
+  }
+
+  const handleSaveReminder = () => {
+    if (!title.trim() || !time) {
+      toast({
+        title: "Missing information",
+        description: "Please provide at least a title and time.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (editingReminderId === null) {
+      const newReminder: Reminder = {
+        id: Date.now(),
+        title,
+        description,
+        time,
+        frequency,
+        date: date || undefined,
+        alexa: alexaEnabled,
+        completed: false,
+      }
+      setReminders((prev) => [...prev, newReminder])
+      toast({
+        title: "Reminder added",
+        description: `"${title}" has been created.`,
+      })
+    } else {
+      setReminders((prev) =>
+        prev.map((reminder) =>
+          reminder.id === editingReminderId
+            ? {
+                ...reminder,
+                title,
+                description,
+                time,
+                frequency,
+                date: date || undefined,
+                alexa: alexaEnabled,
+              }
+            : reminder,
+        ),
+      )
+      toast({
+        title: "Reminder updated",
+        description: `"${title}" has been updated.`,
+      })
+    }
+
+    setIsAddingReminder(false)
+    resetForm()
+  }
+
+  const handleToggleComplete = (id: number) => {
+    setReminders((prev) =>
+      prev.map((reminder) =>
+        reminder.id === id ? { ...reminder, completed: !reminder.completed } : reminder,
+      ),
+    )
+  }
+
+  const handleDeleteReminder = (id: number) => {
+    const toDelete = reminders.find((r) => r.id === id)
+    setReminders((prev) => prev.filter((reminder) => reminder.id !== id))
+    toast({
+      title: "Reminder deleted",
+      description: toDelete ? `"${toDelete.title}" has been removed.` : "Reminder removed.",
+    })
+  }
+
+  const handleRestoreReminder = (id: number) => {
+    setReminders((prev) =>
+      prev.map((reminder) =>
+        reminder.id === id ? { ...reminder, completed: false } : reminder,
+      ),
+    )
+  }
 
   const filteredReminders = reminders.filter(
     (reminder) =>
@@ -104,46 +228,71 @@ export default function RemindersPage() {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-            <Dialog open={isAddingReminder} onOpenChange={setIsAddingReminder}>
+            <Dialog
+              open={isAddingReminder}
+              onOpenChange={(open) => {
+                setIsAddingReminder(open)
+                if (!open) resetForm()
+              }}
+            >
               <DialogTrigger asChild>
-                <Button className="gap-2">
+                <Button className="gap-2" onClick={openAddDialog}>
                   <Plus className="h-4 w-4" />
                   Add Reminder
                 </Button>
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>Add New Reminder</DialogTitle>
-                  <DialogDescription>Create a new reminder that can be announced by Alexa.</DialogDescription>
+                  <DialogTitle>{editingReminderId ? "Edit Reminder" : "Add New Reminder"}</DialogTitle>
+                  <DialogDescription>
+                    {editingReminderId
+                      ? "Update the reminder details and save your changes."
+                      : "Create a new reminder that can be announced by Alexa."}
+                  </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 py-4">
                   <div className="space-y-2">
                     <Label htmlFor="title">Reminder Title</Label>
-                    <Input id="title" placeholder="e.g., Take Medication" />
+                    <Input
+                      id="title"
+                      placeholder="e.g., Take Medication"
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                    />
                   </div>
 
                   <div className="space-y-2">
                     <Label htmlFor="description">Description</Label>
-                    <Textarea id="description" placeholder="Add details about this reminder" />
+                    <Textarea
+                      id="description"
+                      placeholder="Add details about this reminder"
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                    />
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="time">Time</Label>
-                      <Input id="time" type="time" />
+                      <Input
+                        id="time"
+                        type="time"
+                        value={time}
+                        onChange={(e) => setTime(e.target.value)}
+                      />
                     </div>
 
                     <div className="space-y-2">
                       <Label htmlFor="frequency">Frequency</Label>
-                      <Select>
+                      <Select value={frequency} onValueChange={setFrequency}>
                         <SelectTrigger>
                           <SelectValue placeholder="Select frequency" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="once">Once</SelectItem>
-                          <SelectItem value="daily">Daily</SelectItem>
-                          <SelectItem value="weekly">Weekly</SelectItem>
-                          <SelectItem value="monthly">Monthly</SelectItem>
+                          <SelectItem value="Daily">Daily</SelectItem>
+                          <SelectItem value="Weekly">Weekly</SelectItem>
+                          <SelectItem value="Monthly">Monthly</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -151,7 +300,12 @@ export default function RemindersPage() {
 
                   <div className="space-y-2">
                     <Label htmlFor="date">Date</Label>
-                    <Input id="date" type="date" />
+                    <Input
+                      id="date"
+                      type="date"
+                      value={date}
+                      onChange={(e) => setDate(e.target.value)}
+                    />
                   </div>
 
                   <div className="flex items-center justify-between">
@@ -159,14 +313,26 @@ export default function RemindersPage() {
                       <Bell className="h-4 w-4" />
                       Alexa Announcement
                     </Label>
-                    <Switch id="alexa" defaultChecked />
+                    <Switch
+                      id="alexa"
+                      checked={alexaEnabled}
+                      onCheckedChange={(checked) => setAlexaEnabled(!!checked)}
+                    />
                   </div>
                 </div>
                 <DialogFooter>
-                  <Button variant="outline" onClick={() => setIsAddingReminder(false)}>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setIsAddingReminder(false)
+                      resetForm()
+                    }}
+                  >
                     Cancel
                   </Button>
-                  <Button onClick={() => setIsAddingReminder(false)}>Add Reminder</Button>
+                  <Button onClick={handleSaveReminder}>
+                    {editingReminderId ? "Save Changes" : "Add Reminder"}
+                  </Button>
                 </DialogFooter>
               </DialogContent>
             </Dialog>
@@ -236,15 +402,20 @@ export default function RemindersPage() {
                         </div>
                         <div className="flex gap-2">
                           {!reminder.completed && (
-                            <Button variant="outline" size="sm" className="gap-1">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="gap-1"
+                              onClick={() => handleToggleComplete(reminder.id)}
+                            >
                               <Check className="h-3 w-3" />
                               Complete
                             </Button>
                           )}
-                          <Button variant="ghost" size="icon">
+                          <Button variant="ghost" size="icon" onClick={() => openEditDialog(reminder)}>
                             <Edit className="h-4 w-4" />
                           </Button>
-                          <Button variant="ghost" size="icon">
+                          <Button variant="ghost" size="icon" onClick={() => handleDeleteReminder(reminder.id)}>
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
@@ -254,7 +425,7 @@ export default function RemindersPage() {
                 </div>
               </CardContent>
               <CardFooter>
-                <Button className="w-full gap-2" onClick={() => setIsAddingReminder(true)}>
+                <Button className="w-full gap-2" onClick={openAddDialog}>
                   <Plus className="h-4 w-4" />
                   Add Reminder
                 </Button>
@@ -304,10 +475,10 @@ export default function RemindersPage() {
                           </div>
                         </div>
                         <div className="flex gap-2">
-                          <Button variant="ghost" size="icon">
+                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(reminder)}>
                             <Edit className="h-4 w-4" />
                           </Button>
-                          <Button variant="ghost" size="icon">
+                            <Button variant="ghost" size="icon" onClick={() => handleDeleteReminder(reminder.id)}>
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
@@ -358,11 +529,16 @@ export default function RemindersPage() {
                             </div>
                           </div>
                           <div className="flex gap-2">
-                            <Button variant="outline" size="sm" className="gap-1">
-                              <Repeat className="h-3 w-3" />
-                              Restore
-                            </Button>
-                            <Button variant="ghost" size="icon">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-1"
+                            onClick={() => handleRestoreReminder(reminder.id)}
+                          >
+                            <Repeat className="h-3 w-3" />
+                            Restore
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => handleDeleteReminder(reminder.id)}>
                               <Trash2 className="h-4 w-4" />
                             </Button>
                           </div>

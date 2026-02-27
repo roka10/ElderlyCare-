@@ -22,73 +22,197 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { useToast } from "@/hooks/use-toast"
+
+type Task = {
+  id: number
+  title: string
+  description: string
+  priority: "low" | "medium" | "high"
+  status: "pending" | "completed"
+  dueDate: string
+  dueTime: string
+  alexa: boolean
+}
+
+const initialTasks: Task[] = [
+  {
+    id: 1,
+    title: "Take morning medication",
+    description: "Blood pressure and heart medication",
+    priority: "high",
+    status: "completed",
+    dueDate: "Today",
+    dueTime: "9:00 AM",
+    alexa: true,
+  },
+  {
+    id: 2,
+    title: "Lunch",
+    description: "Prepared meal in refrigerator",
+    priority: "medium",
+    status: "pending",
+    dueDate: "Today",
+    dueTime: "12:30 PM",
+    alexa: true,
+  },
+  {
+    id: 3,
+    title: "Doctor appointment",
+    description: "Checkup with Dr. Johnson",
+    priority: "high",
+    status: "pending",
+    dueDate: "Today",
+    dueTime: "3:30 PM",
+    alexa: true,
+  },
+  {
+    id: 4,
+    title: "Evening medication",
+    description: "Take before dinner",
+    priority: "high",
+    status: "pending",
+    dueDate: "Today",
+    dueTime: "6:00 PM",
+    alexa: true,
+  },
+  {
+    id: 5,
+    title: "Physical therapy exercises",
+    description: "Gentle stretching routine",
+    priority: "medium",
+    status: "pending",
+    dueDate: "Tomorrow",
+    dueTime: "10:00 AM",
+    alexa: true,
+  },
+  {
+    id: 6,
+    title: "Grocery delivery",
+    description: "Delivery from Whole Foods",
+    priority: "low",
+    status: "pending",
+    dueDate: "Tomorrow",
+    dueTime: "2:00 PM",
+    alexa: false,
+  },
+]
 
 export default function TasksPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [isAddingTask, setIsAddingTask] = useState(false)
+  const [tasks, setTasks] = useState<Task[]>(initialTasks)
+  const [editingTaskId, setEditingTaskId] = useState<number | null>(null)
+  const [title, setTitle] = useState("")
+  const [description, setDescription] = useState("")
+  const [priority, setPriority] = useState<"low" | "medium" | "high">("medium")
+  const [status, setStatus] = useState<"pending" | "completed">("pending")
+  const [dueDate, setDueDate] = useState("")
+  const [dueTime, setDueTime] = useState("")
+  const [alexaEnabled, setAlexaEnabled] = useState(true)
+  const { toast } = useToast()
 
-  const tasks = [
-    {
-      id: 1,
-      title: "Take morning medication",
-      description: "Blood pressure and heart medication",
-      priority: "high",
-      status: "completed",
-      dueDate: "Today",
-      dueTime: "9:00 AM",
-      alexa: true,
-    },
-    {
-      id: 2,
-      title: "Lunch",
-      description: "Prepared meal in refrigerator",
-      priority: "medium",
-      status: "pending",
-      dueDate: "Today",
-      dueTime: "12:30 PM",
-      alexa: true,
-    },
-    {
-      id: 3,
-      title: "Doctor appointment",
-      description: "Checkup with Dr. Johnson",
-      priority: "high",
-      status: "pending",
-      dueDate: "Today",
-      dueTime: "3:30 PM",
-      alexa: true,
-    },
-    {
-      id: 4,
-      title: "Evening medication",
-      description: "Take before dinner",
-      priority: "high",
-      status: "pending",
-      dueDate: "Today",
-      dueTime: "6:00 PM",
-      alexa: true,
-    },
-    {
-      id: 5,
-      title: "Physical therapy exercises",
-      description: "Gentle stretching routine",
-      priority: "medium",
-      status: "pending",
-      dueDate: "Tomorrow",
-      dueTime: "10:00 AM",
-      alexa: true,
-    },
-    {
-      id: 6,
-      title: "Grocery delivery",
-      description: "Delivery from Whole Foods",
-      priority: "low",
-      status: "pending",
-      dueDate: "Tomorrow",
-      dueTime: "2:00 PM",
-      alexa: false,
-    },
-  ]
+  const resetForm = () => {
+    setTitle("")
+    setDescription("")
+    setPriority("medium")
+    setStatus("pending")
+    setDueDate("")
+    setDueTime("")
+    setAlexaEnabled(true)
+    setEditingTaskId(null)
+  }
+
+  const openAddDialog = () => {
+    resetForm()
+    setIsAddingTask(true)
+  }
+
+  const openEditDialog = (task: Task) => {
+    setEditingTaskId(task.id)
+    setTitle(task.title)
+    setDescription(task.description)
+    setPriority(task.priority)
+    setStatus(task.status)
+    setDueDate(task.dueDate === "Today" || task.dueDate === "Tomorrow" ? "" : task.dueDate)
+    setDueTime(task.dueTime)
+    setAlexaEnabled(task.alexa)
+    setIsAddingTask(true)
+  }
+
+  const handleSaveTask = () => {
+    if (!title.trim()) {
+      toast({
+        title: "Missing title",
+        description: "Please enter a task title.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const normalizedDueDate = dueDate || "Today"
+
+    if (editingTaskId === null) {
+      const newTask: Task = {
+        id: Date.now(),
+        title,
+        description,
+        priority,
+        status,
+        dueDate: normalizedDueDate,
+        dueTime: dueTime || "9:00 AM",
+        alexa: alexaEnabled,
+      }
+      setTasks((prev) => [...prev, newTask])
+      toast({
+        title: "Task added",
+        description: `"${title}" has been created.`,
+      })
+    } else {
+      setTasks((prev) =>
+        prev.map((task) =>
+          task.id === editingTaskId
+            ? {
+                ...task,
+                title,
+                description,
+                priority,
+                status,
+                dueDate: normalizedDueDate,
+                dueTime: dueTime || task.dueTime,
+                alexa: alexaEnabled,
+              }
+            : task,
+        ),
+      )
+      toast({
+        title: "Task updated",
+        description: `"${title}" has been updated.`,
+      })
+    }
+
+    setIsAddingTask(false)
+    resetForm()
+  }
+
+  const handleToggleComplete = (id: number) => {
+    setTasks((prev) =>
+      prev.map((task) =>
+        task.id === id
+          ? { ...task, status: task.status === "completed" ? "pending" : "completed" }
+          : task,
+      ),
+    )
+  }
+
+  const handleDeleteTask = (id: number) => {
+    const toDelete = tasks.find((t) => t.id === id)
+    setTasks((prev) => prev.filter((task) => task.id !== id))
+    toast({
+      title: "Task deleted",
+      description: toDelete ? `"${toDelete.title}" has been removed.` : "Task removed.",
+    })
+  }
 
   const filteredTasks = tasks.filter(
     (task) =>
@@ -120,33 +244,53 @@ export default function TasksPage() {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-            <Dialog open={isAddingTask} onOpenChange={setIsAddingTask}>
+            <Dialog
+              open={isAddingTask}
+              onOpenChange={(open) => {
+                setIsAddingTask(open)
+                if (!open) resetForm()
+              }}
+            >
               <DialogTrigger asChild>
-                <Button className="gap-2">
+                <Button className="gap-2" onClick={openAddDialog}>
                   <Plus className="h-4 w-4" />
                   Add Task
                 </Button>
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>Add New Task</DialogTitle>
-                  <DialogDescription>Create a new task that can be announced by Alexa.</DialogDescription>
+                  <DialogTitle>{editingTaskId ? "Edit Task" : "Add New Task"}</DialogTitle>
+                  <DialogDescription>
+                    {editingTaskId
+                      ? "Update the task details and save your changes."
+                      : "Create a new task that can be announced by Alexa."}
+                  </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 py-4">
                   <div className="space-y-2">
                     <Label htmlFor="title">Task Title</Label>
-                    <Input id="title" placeholder="e.g., Take Medication" />
+                    <Input
+                      id="title"
+                      placeholder="e.g., Take Medication"
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                    />
                   </div>
 
                   <div className="space-y-2">
                     <Label htmlFor="description">Description</Label>
-                    <Textarea id="description" placeholder="Add details about this task" />
+                    <Textarea
+                      id="description"
+                      placeholder="Add details about this task"
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                    />
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="priority">Priority</Label>
-                      <Select>
+                      <Select value={priority} onValueChange={(v: "low" | "medium" | "high") => setPriority(v)}>
                         <SelectTrigger>
                           <SelectValue placeholder="Select priority" />
                         </SelectTrigger>
@@ -160,7 +304,7 @@ export default function TasksPage() {
 
                     <div className="space-y-2">
                       <Label htmlFor="status">Status</Label>
-                      <Select defaultValue="pending">
+                      <Select value={status} onValueChange={(v: "pending" | "completed") => setStatus(v)}>
                         <SelectTrigger>
                           <SelectValue placeholder="Select status" />
                         </SelectTrigger>
@@ -175,12 +319,22 @@ export default function TasksPage() {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="dueDate">Due Date</Label>
-                      <Input id="dueDate" type="date" />
+                      <Input
+                        id="dueDate"
+                        type="date"
+                        value={dueDate}
+                        onChange={(e) => setDueDate(e.target.value)}
+                      />
                     </div>
 
                     <div className="space-y-2">
                       <Label htmlFor="dueTime">Due Time</Label>
-                      <Input id="dueTime" type="time" />
+                      <Input
+                        id="dueTime"
+                        type="time"
+                        value={dueTime}
+                        onChange={(e) => setDueTime(e.target.value)}
+                      />
                     </div>
                   </div>
 
@@ -189,14 +343,24 @@ export default function TasksPage() {
                       <Mic className="h-4 w-4" />
                       Alexa Reminder
                     </Label>
-                    <Switch id="alexa" defaultChecked />
+                    <Switch
+                      id="alexa"
+                      checked={alexaEnabled}
+                      onCheckedChange={(checked) => setAlexaEnabled(!!checked)}
+                    />
                   </div>
                 </div>
                 <DialogFooter>
-                  <Button variant="outline" onClick={() => setIsAddingTask(false)}>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setIsAddingTask(false)
+                      resetForm()
+                    }}
+                  >
                     Cancel
                   </Button>
-                  <Button onClick={() => setIsAddingTask(false)}>Add Task</Button>
+                  <Button onClick={handleSaveTask}>{editingTaskId ? "Save Changes" : "Add Task"}</Button>
                 </DialogFooter>
               </DialogContent>
             </Dialog>
@@ -293,20 +457,30 @@ export default function TasksPage() {
                         </div>
                         <div className="flex gap-2">
                           {task.status === "pending" ? (
-                            <Button variant="outline" size="sm" className="gap-1">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="gap-1"
+                              onClick={() => handleToggleComplete(task.id)}
+                            >
                               <Check className="h-3 w-3" />
                               Complete
                             </Button>
                           ) : (
-                            <Button variant="outline" size="sm" className="gap-1">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="gap-1"
+                              onClick={() => handleToggleComplete(task.id)}
+                            >
                               <X className="h-3 w-3" />
                               Undo
                             </Button>
                           )}
-                          <Button variant="ghost" size="icon">
+                          <Button variant="ghost" size="icon" onClick={() => openEditDialog(task)}>
                             <Edit className="h-4 w-4" />
                           </Button>
-                          <Button variant="ghost" size="icon">
+                          <Button variant="ghost" size="icon" onClick={() => handleDeleteTask(task.id)}>
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
@@ -316,7 +490,7 @@ export default function TasksPage() {
                 </div>
               </CardContent>
               <CardFooter>
-                <Button className="w-full gap-2" onClick={() => setIsAddingTask(true)}>
+                <Button className="w-full gap-2" onClick={openAddDialog}>
                   <Plus className="h-4 w-4" />
                   Add Task
                 </Button>
@@ -386,10 +560,10 @@ export default function TasksPage() {
                           </div>
                         </div>
                         <div className="flex gap-2">
-                          <Button variant="ghost" size="icon">
+                          <Button variant="ghost" size="icon" onClick={() => openEditDialog(task)}>
                             <Edit className="h-4 w-4" />
                           </Button>
-                          <Button variant="ghost" size="icon">
+                          <Button variant="ghost" size="icon" onClick={() => handleDeleteTask(task.id)}>
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
@@ -443,7 +617,12 @@ export default function TasksPage() {
                               </div>
                             </div>
                           </div>
-                          <Button variant="outline" size="sm" className="gap-1">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-1"
+                            onClick={() => handleToggleComplete(task.id)}
+                          >
                             <Check className="h-3 w-3" />
                             Complete
                           </Button>
@@ -486,7 +665,12 @@ export default function TasksPage() {
                               </div>
                             </div>
                           </div>
-                          <Button variant="outline" size="sm" className="gap-1">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-1"
+                            onClick={() => handleToggleComplete(task.id)}
+                          >
                             <X className="h-3 w-3" />
                             Undo
                           </Button>
