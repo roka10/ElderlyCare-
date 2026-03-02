@@ -13,8 +13,10 @@ An intelligent home monitoring system that uses real-time AI detection (face rec
 | **Motion Detection** | Frame-differencing detects movement and alerts when no person is visible |
 | **Fall Detection** | Posture aspect-ratio analysis flags potential falls with instant alerts |
 | **Visitor Management** | Add known visitors with photos, relationship, and notes — persisted in Supabase |
-| **Authentication** | Email + password signup/login via Supabase Auth |
+| **Authentication** | Email + password signup/login via Supabase Auth with password strength meter |
+| **Profile Management** | Upload profile photo during signup (required), edit personal info in settings |
 | **Real-time Dashboard** | Live status cards, alerts, and camera stream with 4 AI models running simultaneously |
+| **Premium UI** | Glassmorphism, gradient effects, animated backgrounds, dark mode support |
 
 ---
 
@@ -102,39 +104,45 @@ cd ElderlyCare-
 3. Go to **SQL Editor** and run this to create the required tables:
 
 ```sql
--- Users table (auto-populated on signup)
-CREATE TABLE public.users (
-  id          UUID REFERENCES auth.users ON DELETE CASCADE NOT NULL PRIMARY KEY,
+-- Users / profiles table (auto-populated on signup)
+CREATE TABLE IF NOT EXISTS public.profiles (
+  id          UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   name        TEXT,
   email       TEXT,
-  role        TEXT,
-  password    TEXT,
-  created_at  TIMESTAMPTZ DEFAULT NOW()
+  role        TEXT DEFAULT 'family',
+  avatar_url  TEXT,
+  phone       TEXT,
+  address     TEXT,
+  bio         TEXT,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
-ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users can view own profile" ON public.users FOR SELECT USING (auth.uid() = id);
-CREATE POLICY "Users can update own profile" ON public.users FOR UPDATE USING (auth.uid() = id);
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can view own profile" ON public.profiles FOR SELECT USING (auth.uid() = id);
+CREATE POLICY "Users can update own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
+CREATE POLICY "Users can insert own profile" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
 
--- Trigger: auto-copy user data on signup
+-- Trigger: auto-create profile on signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO public.users (id, name, email, role, password)
+  INSERT INTO public.profiles (id, name, email, role, avatar_url)
   VALUES (
     NEW.id,
     NEW.raw_user_meta_data->>'name',
     NEW.email,
-    NEW.raw_user_meta_data->>'role',
-    NEW.raw_user_meta_data->>'password'
+    COALESCE(NEW.raw_user_meta_data->>'role', 'family'),
+    NEW.raw_user_meta_data->>'avatar_url'
   );
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
-  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- Known persons table (face recognition data)
 CREATE TABLE IF NOT EXISTS known_persons (
@@ -324,12 +332,12 @@ This app uses **Supabase Authentication** (email + password).
 |---|---|---|
 | `/video_feed` | GET | MJPEG live video stream with AI overlays |
 | `/detection_status` | GET | Current detection state (JSON) |
+| `/camera_start` | POST | Start camera (clean close → open) |
+| `/camera_stop` | POST | Stop camera and release hardware |
 | `/register_face` | POST | Register face from live camera frame |
 | `/register_face_upload` | POST | Register face from uploaded image |
 | `/known_faces` | GET | List all registered persons |
 | `/delete_face/<name>` | DELETE | Remove a registered person |
-| `/auth/login` | POST | User login (legacy Flask-JWT) |
-| `/auth/register` | POST | User registration (legacy Flask-JWT) |
 
 ---
 
@@ -397,6 +405,7 @@ Go to **Supabase Dashboard → Authentication → Providers → Email** → Turn
 - [ ] Video clip recording on fall detection
 - [ ] Cloud-hosted deployment (Vercel + Railway)
 - [ ] Multiple photos per person for better recognition accuracy
+- [ ] Role-based access control (caregiver vs family permissions)
 
 ---
 

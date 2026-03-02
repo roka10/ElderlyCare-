@@ -10,13 +10,14 @@ type User = {
   name: string
   email: string
   role: "caregiver" | "family"
+  avatar_url?: string
 }
 
 type AuthContextType = {
   user: User | null
   loading: boolean
   login: (email: string, password: string) => Promise<void>
-  signup: (name: string, email: string, password: string, role: "caregiver" | "family") => Promise<void>
+  signup: (name: string, email: string, password: string, role: "caregiver" | "family", avatar_url?: string) => Promise<void>
   logout: () => void
 }
 
@@ -40,6 +41,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           name: u.user_metadata?.name || "User",
           email: u.email || "",
           role: u.user_metadata?.role || "family",
+          avatar_url: u.user_metadata?.avatar_url || undefined,
         })
       }
       setLoading(false)
@@ -57,6 +59,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             name: u.user_metadata?.name || "User",
             email: u.email || "",
             role: u.user_metadata?.role || "family",
+            avatar_url: u.user_metadata?.avatar_url || undefined,
           })
         } else {
           setUser(null)
@@ -92,7 +95,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  const signup = async (name: string, email: string, password: string, role: "caregiver" | "family") => {
+  const signup = async (name: string, email: string, password: string, role: "caregiver" | "family", avatar_url?: string) => {
     setLoading(true)
     try {
       const { data, error } = await supabase.auth.signUp({
@@ -102,7 +105,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           data: {
             name,
             role,
-            password,
+            avatar_url: avatar_url || undefined,
           },
         },
       })

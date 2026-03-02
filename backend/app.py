@@ -79,17 +79,23 @@ frame_lock  = threading.Lock()
 camera = None
 camera_active = False
 camera_lock = threading.Lock()
+camera_generation = 0          # bumped on every stop → lets old generators exit fast
 
 def open_camera():
-    global camera, camera_active
+    global camera, camera_active, prev_gray
     with camera_lock:
         if camera is not None and camera.isOpened():
             camera_active = True
             return True
-        camera = cv2.VideoCapture(0)
-        if camera.isOpened():
+        cam = cv2.VideoCapture(0)
+        if cam.isOpened():
+            cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cam.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            camera = cam
             camera_active = True
-            print("[Camera] Opened")
+            prev_gray = None          # reset motion detection state
+            print("[Camera] Opened (640×480)")
             return True
         camera = None
         camera_active = False
@@ -97,24 +103,30 @@ def open_camera():
         return False
 
 def close_camera():
-    global camera, camera_active
+    global camera, camera_active, camera_generation, prev_gray
+    camera_active = False
+    camera_generation += 1     # signal old generators to exit
+    prev_gray = None
+    time.sleep(0.3)            # give the generator loop time to see the flag
     with camera_lock:
-        camera_active = False
         if camera is not None:
-            camera.release()
+            try:
+                camera.release()
+            except Exception:
+                pass
             camera = None
             print("[Camera] Released")
 
-# ─── Haar Cascade ─────────────────────────────────────────────────────────────
+# ─── Haar Cascade ─────────────────────────────────────────────────────────
 face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 )
 
-# ─── LBPH Face Recogniser ─────────────────────────────────────────────────────
-lbph         = cv2.face.LBPHFaceRecognizer_create()
-label_map    = {}        # int → name
+# ─── LBPH Face Recognition ────────────────────────────────────────────────
+lbph       = cv2.face.LBPHFaceRecognizer_create()
 lbph_trained = False
-lbph_lock    = threading.Lock()
+label_map  = {}
+lbph_lock  = threading.Lock()
 
 def train_lbph():
     """Scan known_faces/<Name>/*.jpg and train LBPH."""
@@ -187,26 +199,22 @@ def recognize_face(face_gray_roi):
 
 # ─── Supabase Sync ────────────────────────────────────────────────────────────
 def sync_from_supabase():
-    """
-    On server startup: fetch all known persons from Supabase,
-    download their photos locally, then train LBPH.
-    """
     if not supabase_client:
-        print("[Supabase Sync] Skipped — no Supabase client.")
+        print("[Supabase Sync] No client — training from local files only.")
         train_lbph()
         return
     try:
-        res  = supabase_client.table("known_persons").select("*").execute()
-        rows = res.data or []
-        print(f"[Supabase Sync] Found {len(rows)} known persons in DB.")
-        for row in rows:
-            name      = row.get("name", "").strip()
-            photo_url = row.get("photo_url", "")
-            if not name or not photo_url:
+        result = supabase_client.table("known_persons").select("*").execute()
+        persons = result.data or []
+        print(f"[Supabase Sync] Found {len(persons)} known persons in DB.")
+        for p in persons:
+            name      = p.get("name", "Unknown")
+            photo_url = p.get("photo_url", "")
+            if not photo_url:
                 continue
             person_dir = os.path.join(KNOWN_FACES_DIR, name)
             os.makedirs(person_dir, exist_ok=True)
-            img_path   = os.path.join(person_dir, "photo.jpg")
+            img_path = os.path.join(person_dir, "photo.jpg")
             if not os.path.exists(img_path):
                 try:
                     urllib.request.urlretrieve(photo_url, img_path)
@@ -255,18 +263,19 @@ def detect_emotion_dnn(face_bgr):
     except Exception:
         return "N/A", 0.0
 
-# ─── Motion Detection ──────────────────────────────────────────────────────────
+# ─── Motion Detection (optimised — reuses precomputed gray) ───────────────────
 prev_gray = None
-def detect_motion(frame):
+def detect_motion(gray_frame):
+    """Takes an already-grayscale frame (avoids duplicate cvtColor)."""
     global prev_gray
-    gray = cv2.GaussianBlur(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (21,21), 0)
+    small = cv2.GaussianBlur(gray_frame, (21, 21), 0)
     if prev_gray is None:
-        prev_gray = gray; return False
-    diff      = cv2.absdiff(prev_gray, gray)
+        prev_gray = small; return False
+    diff      = cv2.absdiff(prev_gray, small)
     _, thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
     thresh    = cv2.dilate(thresh, None, iterations=2)
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    prev_gray = gray
+    prev_gray = small
     return any(cv2.contourArea(c) > 600 for c in contours)
 
 # ─── Fall Detection ────────────────────────────────────────────────────────────
@@ -318,7 +327,7 @@ def delete_from_supabase_storage(storage_path: str):
     except Exception as e:
         print(f"[Supabase Storage] Delete failed: {e}")
 
-# ─── Frame Generator ───────────────────────────────────────────────────────────
+# ─── Frame Generator (optimised) ──────────────────────────────────────────────
 EMOTION_COLORS = {
     "Happy":    (0, 255, 255),  "Sad":      (255, 80, 80),
     "Angry":    (0, 0, 255),    "Fear":     (200, 0, 200),
@@ -326,21 +335,40 @@ EMOTION_COLORS = {
     "Neutral":  (0, 255, 0),    "N/A":      (180, 180, 180),
 }
 
+TARGET_FPS      = 24
+FACE_DETECT_INTERVAL = 3   # run HaarCascade every Nth frame
+EMIT_INTERVAL        = 0.5 # seconds between socket.io emissions
+
 def generate_frames():
+    my_gen = camera_generation   # snapshot — if this changes, we must exit
     last_emotion_time = 0.0
-    while camera_active:
+    last_emit_time    = 0.0
+    frame_count       = 0
+    cached_faces      = ()
+    cached_gray       = None
+
+    while camera_active and camera_generation == my_gen:
+        t_start = time.time()
+
         with camera_lock:
             if camera is None or not camera.isOpened():
                 break
             success, frame = camera.read()
-        if not success:
-            time.sleep(0.05); continue
+        if not success or camera_generation != my_gen:
+            time.sleep(0.02); continue
 
         display = frame.copy()
         h_frame, w_frame = display.shape[:2]
-        gray  = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(60, 60))
-        faces_count       = len(faces)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+        # ── Face detection (every Nth frame for speed) ──
+        frame_count += 1
+        if frame_count % FACE_DETECT_INTERVAL == 0:
+            cached_faces = face_cascade.detectMultiScale(gray, 1.15, 5, minSize=(50, 50))
+            cached_gray  = gray
+
+        faces       = cached_faces
+        faces_count = len(faces)
         face_bbox_for_fall = tuple(faces[0]) if faces_count > 0 else None
 
         now = time.time()
@@ -349,10 +377,12 @@ def generate_frames():
             current_emo_conf = detection_state["emotion_confidence"]
             current_name     = detection_state["face_name"]
 
+        # ── Emotion + face recognition (throttled to every 2s) ──
         if faces_count > 0 and (now - last_emotion_time) > 2.0:
             fx, fy, fw, fh = faces[0]
             emo, emo_conf  = detect_emotion_dnn(frame[fy:fy+fh, fx:fx+fw])
-            name, _        = recognize_face(gray[fy:fy+fh, fx:fx+fw])
+            use_gray = cached_gray if cached_gray is not None else gray
+            name, _        = recognize_face(use_gray[fy:fy+fh, fx:fx+fw])
             with state_lock:
                 detection_state["emotion"]            = emo
                 detection_state["emotion_confidence"] = emo_conf
@@ -365,6 +395,7 @@ def generate_frames():
                 detection_state["face_name"] = "No Face"
             current_emotion, current_name = "N/A", "No Face"
 
+        # ── Draw face boxes ──
         box_color = EMOTION_COLORS.get(current_emotion, (0, 255, 0))
         for (fx, fy, fw, fh) in faces:
             cv2.rectangle(display, (fx, fy), (fx+fw, fy+fh), box_color, 2)
@@ -379,7 +410,8 @@ def generate_frames():
             cv2.putText(display, emo_text, (fx+4, fy+fh+20),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 1)
 
-        is_motion   = detect_motion(frame)
+        # ── Motion + fall (use precomputed gray) ──
+        is_motion   = detect_motion(gray)
         is_fall     = detect_fall(face_bbox_for_fall)
         motion_status = "Motion Detected" if is_motion else "No Motion"
         fall_status   = ("FALL DETECTED!" if fall_active
@@ -390,7 +422,7 @@ def generate_frames():
             detection_state["fall"]        = fall_status
             detection_state["faces_count"] = faces_count
 
-        # HUD overlay
+        # ── HUD overlay ──
         overlay = display.copy()
         cv2.rectangle(overlay, (0, 0), (360, 100), (20,20,20), -1)
         cv2.addWeighted(overlay, 0.5, display, 0.5, 0, display)
@@ -407,11 +439,21 @@ def generate_frames():
             cv2.rectangle(display, (bx-10, 8), (bx+bw+10, bh+24), (0,0,200), -1)
             cv2.putText(display, banner, (bx, bh+16), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
 
-        socketio.emit("detection_update", {**detection_state})
+        # ── Throttle socket.io emissions ──
+        if (now - last_emit_time) > EMIT_INTERVAL:
+            socketio.emit("detection_update", {**detection_state})
+            last_emit_time = now
 
-        ret, buf = cv2.imencode(".jpg", display, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        # ── Encode + yield the frame ──
+        ret, buf = cv2.imencode(".jpg", display, [cv2.IMWRITE_JPEG_QUALITY, 65])
         if ret:
             yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n")
+
+        # ── FPS cap — prevent spinning at 100% CPU ──
+        elapsed = time.time() - t_start
+        sleep_time = max(0, (1.0 / TARGET_FPS) - elapsed)
+        if sleep_time > 0:
+            time.sleep(sleep_time)
 
 
 # ─── API Routes ────────────────────────────────────────────────────────────────
@@ -421,11 +463,14 @@ def index():
 
 @app.route("/video_feed")
 def video_feed():
-    open_camera()
+    if not camera_active:
+        open_camera()
     return Response(generate_frames(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 @app.route("/camera_start", methods=["POST"])
 def camera_start():
+    # Full restart: close old → open new
+    close_camera()
     ok = open_camera()
     return jsonify({"active": ok}), (200 if ok else 500)
 

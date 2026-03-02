@@ -19,7 +19,7 @@ import {
 import {
   AlertTriangle, Camera, CameraOff, Maximize2, Minimize2,
   PhoneCall, Activity, Smile, PersonStanding, Wifi, WifiOff,
-  UserPlus, Users, Trash2, CheckCircle,
+  UserPlus, Users, Trash2, CheckCircle, Loader2,
 } from "lucide-react"
 
 const BACKEND = "http://127.0.0.1:5000"
@@ -47,8 +47,10 @@ const EMOTION_EMOJI: Record<string, string> = {
 
 export default function LiveFeedPage() {
   const [isCameraOn, setIsCameraOn] = useState(false)
+  const [feedKey, setFeedKey] = useState(0)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isConnected, setIsConnected] = useState(false)
+  const [isStarting, setIsStarting] = useState(false)
   const [detection, setDetection] = useState<DetectionState>({
     face_name: "No Face", emotion: "N/A", emotion_confidence: 0,
     motion: "No Motion", fall: "No Fall", faces_count: 0,
@@ -256,16 +258,27 @@ export default function LiveFeedPage() {
             </div>
             <div className="flex gap-2">
               <Button variant={isCameraOn ? "default" : "outline"} size="sm" className="gap-1.5"
+                disabled={isStarting}
                 onClick={async () => {
                   if (isCameraOn) {
                     setIsCameraOn(false)
+                    setIsConnected(false)
                     try { await fetch(`${BACKEND}/camera_stop`, { method: "POST" }) } catch { }
                   } else {
-                    setIsCameraOn(true)
+                    setIsStarting(true)
+                    try {
+                      const res = await fetch(`${BACKEND}/camera_start`, { method: "POST" })
+                      if (res.ok) {
+                        setFeedKey(Date.now())
+                        setIsCameraOn(true)
+                      }
+                    } catch { } finally {
+                      // isStarting will be cleared when the first frame loads (onLoad)
+                    }
                   }
                 }}>
-                {isCameraOn ? <CameraOff className="h-4 w-4" /> : <Camera className="h-4 w-4" />}
-                {isCameraOn ? "Stop" : "Start Camera"}
+                {isStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : isCameraOn ? <CameraOff className="h-4 w-4" /> : <Camera className="h-4 w-4" />}
+                {isStarting ? "Starting…" : isCameraOn ? "Stop" : "Start Camera"}
               </Button>
               <Button variant="outline" size="icon" onClick={() => setIsFullscreen(v => !v)}>
                 {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
@@ -276,21 +289,49 @@ export default function LiveFeedPage() {
           <CardContent className="p-0">
             <div className={`relative bg-black flex items-center justify-center overflow-hidden ${isFullscreen ? "h-[calc(100vh-16rem)]" : "aspect-video"}`}>
               {isCameraOn ? (
-                <img
-                  src={`${BACKEND}/video_feed`}
-                  alt="Live AI detection feed"
-                  className="w-full h-full object-contain"
-                  onError={() => setIsConnected(false)}
-                  onLoad={() => setIsConnected(true)}
-                />
+                <>
+                  <img
+                    key={feedKey}
+                    src={`${BACKEND}/video_feed?t=${feedKey}`}
+                    alt="Live AI detection feed"
+                    className="w-full h-full object-contain"
+                    onError={() => { setIsConnected(false); setIsStarting(false) }}
+                    onLoad={() => { setIsConnected(true); setIsStarting(false) }}
+                  />
+                  {/* Loading overlay while camera is initialising */}
+                  {isStarting && (
+                    <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center z-10">
+                      <div className="relative">
+                        <div className="h-20 w-20 rounded-full border-4 border-primary/20 flex items-center justify-center">
+                          <Loader2 className="h-10 w-10 text-primary animate-spin" />
+                        </div>
+                        <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-primary animate-spin" style={{ animationDuration: "1.5s" }} />
+                      </div>
+                      <p className="text-white font-medium mt-6 text-lg">Initializing Camera…</p>
+                      <p className="text-white/50 text-sm mt-1">Loading AI Models</p>
+                    </div>
+                  )}
+                </>
               ) : (
                 <div className="text-center space-y-4 p-8">
                   <div className="mx-auto w-20 h-20 rounded-full bg-muted flex items-center justify-center">
                     <Camera className="h-10 w-10 text-muted-foreground" />
                   </div>
                   <p className="text-muted-foreground">Click <b>Start Camera</b> to begin live AI monitoring</p>
-                  <Button onClick={() => setIsCameraOn(true)} className="gap-2">
-                    <Camera className="h-4 w-4" /> Start Camera
+                  <Button disabled={isStarting} onClick={async () => {
+                    setIsStarting(true)
+                    try {
+                      const res = await fetch(`${BACKEND}/camera_start`, { method: "POST" })
+                      if (res.ok) {
+                        setFeedKey(Date.now())
+                        setIsCameraOn(true)
+                      } else {
+                        setIsStarting(false)
+                      }
+                    } catch { setIsStarting(false) }
+                  }} className="gap-2">
+                    {isStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+                    {isStarting ? "Starting…" : "Start Camera"}
                   </Button>
                 </div>
               )}
