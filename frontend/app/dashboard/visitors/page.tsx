@@ -1,19 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
-
-const BACKEND = "http://127.0.0.1:5000"
-
-interface KnownVisitor {
-  id: number
-  name: string
-  role: string
-  status: string
-  lastVisit: string
-  image: string
-  relationship?: string
-  notes?: string
-}
+import { useState } from "react"
 import { DashboardLayout } from "@/components/dashboard-layout"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -58,41 +45,6 @@ export default function VisitorsPage() {
   const [scheduleVisit, setScheduleVisit] = useState(false)
   const [visitDate, setVisitDate] = useState("")
   const [visitTime, setVisitTime] = useState("")
-
-  // Photo upload state
-  const [photoFile, setPhotoFile] = useState<File | null>(null)
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null)
-  const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "done" | "error">("idle")
-  const fileInputRef = useRef<HTMLInputElement>(null)
-
-  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setPhotoFile(file)
-    const reader = new FileReader()
-    reader.onload = () => setPhotoPreview(reader.result as string)
-    reader.readAsDataURL(file)
-  }
-
-  // Load known visitors from Supabase-backed API on mount
-  useEffect(() => {
-    fetch(`${BACKEND}/known_faces`)
-      .then(r => r.json())
-      .then(data => {
-        const people: KnownVisitor[] = (data.people || []).map((p: Record<string, string>, i: number) => ({
-          id: i + 1,
-          name: p.name,
-          role: p.relationship || "Guest",
-          status: "approved",
-          lastVisit: "—",
-          image: p.photo_url || "/placeholder.svg?height=40&width=40",
-          relationship: p.relationship,
-          notes: p.notes,
-        }))
-        if (people.length > 0) setKnownVisitors(people)
-      })
-      .catch(() => { /* offline — keep local static data */ })
-  }, [])
 
   const initialKnownVisitors = [
     {
@@ -179,75 +131,46 @@ export default function VisitorsPage() {
     setScheduleVisit(false)
     setVisitDate("")
     setVisitTime("")
-    setPhotoFile(null)
-    setPhotoPreview(null)
-    setUploadStatus("idle")
-    if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
-  const handleAddVisitor = async () => {
+  const handleAddVisitor = () => {
     if (!visitorName.trim()) {
-      toast({ title: "Error", description: "Please enter a visitor name", variant: "destructive" })
+      toast({
+        title: "Error",
+        description: "Please enter a visitor name",
+        variant: "destructive",
+      })
       return
     }
+
     if (scheduleVisit && (!visitDate || !visitTime)) {
-      toast({ title: "Error", description: "Please enter both date and time for the scheduled visit", variant: "destructive" })
+      toast({
+        title: "Error",
+        description: "Please enter both date and time for the scheduled visit",
+        variant: "destructive",
+      })
       return
     }
-
-    // ── Upload photo to backend for face recognition ──
-    if (photoFile) {
-      setUploadStatus("uploading")
-      try {
-        const formData = new FormData()
-        formData.append("name", visitorName.trim())
-        formData.append("relationship", visitorRole)
-        formData.append("notes", visitorNotes)
-        formData.append("photo", photoFile)
-        const res = await fetch(`${BACKEND}/register_face_upload`, { method: "POST", body: formData })
-        if (res.ok) {
-          const json = await res.json()
-          setUploadStatus("done")
-          toast({ title: "Face Registered ✅", description: `${visitorName}'s face saved to Supabase. Live feed will now recognise them.` })
-          // Update avatar image to use Supabase photo_url if available
-          if (json.photo_url) {
-            setPhotoPreview(json.photo_url)
-          }
-        } else {
-          const err = await res.json().catch(() => ({}))
-          setUploadStatus("error")
-          toast({ title: "Upload failed", description: err.error || "Could not register face.", variant: "destructive" })
-        }
-      } catch {
-        setUploadStatus("error")
-        toast({ title: "Backend offline", description: "Could not reach backend. Face not registered.", variant: "destructive" })
-      }
-    }
-
-    // ── Add to local known visitors list ──
-    const newVisitor = {
-      id: Date.now(),
-      name: visitorName.trim(),
-      role: visitorRole || "Guest",
-      status: "approved",
-      lastVisit: "Just added",
-      image: photoPreview || "/placeholder.svg?height=40&width=40",
-    }
-    setKnownVisitors(prev => [newVisitor, ...prev])
 
     if (scheduleVisit) {
       const newVisit: UpcomingVisit = {
-        id: Date.now() + 1,
-        name: visitorName.trim(),
+        id: Date.now(),
+        name: visitorName,
         role: visitorRole || "Guest",
         date: visitDate,
         time: visitTime,
-        image: photoPreview || "/placeholder.svg?height=40&width=40",
+        image: "/placeholder.svg?height=40&width=40",
       }
-      setUpcomingVisits(prev => [...prev, newVisit])
-      toast({ title: "Success", description: `Visit scheduled for ${visitorName}` })
-    } else if (!photoFile) {
-      toast({ title: "Success", description: `${visitorName} added to known visitors` })
+      setUpcomingVisits([...upcomingVisits, newVisit])
+      toast({
+        title: "Success",
+        description: `Visit scheduled for ${visitorName}`,
+      })
+    } else {
+      toast({
+        title: "Success",
+        description: `${visitorName} added to known visitors`,
+      })
     }
 
     resetForm()
@@ -278,7 +201,7 @@ export default function VisitorsPage() {
       title: "Success",
       description: `Visit scheduled for ${visitorName}`,
     })
-
+    
     resetForm()
     setIsSchedulingVisit(false)
   }
@@ -367,45 +290,22 @@ export default function VisitorsPage() {
                   <DialogDescription>Add a new trusted visitor and optionally schedule a visit.</DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 py-4">
-                  {/* Hidden file input */}
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    className="hidden"
-                    onChange={handlePhotoSelect}
-                  />
-
-                  <div className="flex flex-col items-center gap-3 mb-4">
-                    <Avatar className="h-24 w-24 ring-2 ring-muted">
-                      <AvatarImage src={photoPreview || "/placeholder.svg?height=80&width=80"} />
-                      <AvatarFallback className="text-2xl">{visitorName?.[0]?.toUpperCase() ?? "?"}</AvatarFallback>
+                  <div className="flex flex-col items-center gap-4 mb-4">
+                    <Avatar className="h-20 w-20">
+                      <AvatarImage src="/placeholder.svg?height=80&width=80" />
+                      <AvatarFallback>?</AvatarFallback>
                     </Avatar>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="gap-2"
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                    >
+                    <Button variant="outline" size="sm" className="gap-2">
                       <Upload className="h-4 w-4" />
-                      {photoFile ? "Change Photo" : "Upload Photo"}
+                      Upload Photo
                     </Button>
-                    {photoFile && (
-                      <p className="text-xs text-green-600 flex items-center gap-1">
-                        <span>✅</span> {photoFile.name} — face will be registered for live recognition
-                      </p>
-                    )}
-                    {uploadStatus === "uploading" && (
-                      <p className="text-xs text-blue-500">Uploading &amp; training model…</p>
-                    )}
                   </div>
 
                   <div className="space-y-2">
                     <Label htmlFor="name">Full Name *</Label>
-                    <Input
-                      id="name"
-                      placeholder="Enter visitor's name"
+                    <Input 
+                      id="name" 
+                      placeholder="Enter visitor's name" 
                       value={visitorName}
                       onChange={(e) => setVisitorName(e.target.value)}
                     />
@@ -430,8 +330,8 @@ export default function VisitorsPage() {
 
                   <div className="space-y-2">
                     <Label htmlFor="notes">Notes</Label>
-                    <Textarea
-                      id="notes"
+                    <Textarea 
+                      id="notes" 
                       placeholder="Add any additional information"
                       value={visitorNotes}
                       onChange={(e) => setVisitorNotes(e.target.value)}
@@ -439,8 +339,8 @@ export default function VisitorsPage() {
                   </div>
 
                   <div className="flex items-center space-x-2 pt-4 border-t">
-                    <Checkbox
-                      id="schedule"
+                    <Checkbox 
+                      id="schedule" 
                       checked={scheduleVisit}
                       onCheckedChange={(checked) => setScheduleVisit(checked as boolean)}
                     />
@@ -457,8 +357,8 @@ export default function VisitorsPage() {
                             <CalendarIcon className="h-3 w-3" />
                             Visit Date *
                           </Label>
-                          <Input
-                            id="visit-date"
+                          <Input 
+                            id="visit-date" 
                             type="date"
                             value={visitDate}
                             onChange={(e) => setVisitDate(e.target.value)}
@@ -469,8 +369,8 @@ export default function VisitorsPage() {
                             <Clock className="h-3 w-3" />
                             Visit Time *
                           </Label>
-                          <Input
-                            id="visit-time"
+                          <Input 
+                            id="visit-time" 
                             type="time"
                             value={visitTime}
                             onChange={(e) => setVisitTime(e.target.value)}
@@ -481,8 +381,8 @@ export default function VisitorsPage() {
                   )}
                 </div>
                 <DialogFooter>
-                  <Button
-                    variant="outline"
+                  <Button 
+                    variant="outline" 
                     onClick={() => {
                       resetForm()
                       setIsAddingVisitor(false)
@@ -647,8 +547,8 @@ export default function VisitorsPage() {
                           <Edit className="h-3 w-3" />
                           Edit
                         </Button>
-                        <Button
-                          variant="ghost"
+                        <Button 
+                          variant="ghost" 
                           size="icon"
                           onClick={() => handleDeleteVisit(visit.id)}
                         >
@@ -675,9 +575,9 @@ export default function VisitorsPage() {
                     <div className="space-y-4 py-4">
                       <div className="space-y-2">
                         <Label htmlFor="schedule-name">Visitor Name *</Label>
-                        <Input
-                          id="schedule-name"
-                          placeholder="Enter visitor's name"
+                        <Input 
+                          id="schedule-name" 
+                          placeholder="Enter visitor's name" 
                           value={visitorName}
                           onChange={(e) => setVisitorName(e.target.value)}
                         />
@@ -706,8 +606,8 @@ export default function VisitorsPage() {
                             <CalendarIcon className="h-3 w-3" />
                             Visit Date *
                           </Label>
-                          <Input
-                            id="schedule-date"
+                          <Input 
+                            id="schedule-date" 
                             type="date"
                             value={visitDate}
                             onChange={(e) => setVisitDate(e.target.value)}
@@ -718,8 +618,8 @@ export default function VisitorsPage() {
                             <Clock className="h-3 w-3" />
                             Visit Time *
                           </Label>
-                          <Input
-                            id="schedule-time"
+                          <Input 
+                            id="schedule-time" 
                             type="time"
                             value={visitTime}
                             onChange={(e) => setVisitTime(e.target.value)}
@@ -729,8 +629,8 @@ export default function VisitorsPage() {
 
                       <div className="space-y-2">
                         <Label htmlFor="schedule-notes">Notes</Label>
-                        <Textarea
-                          id="schedule-notes"
+                        <Textarea 
+                          id="schedule-notes" 
                           placeholder="Add any additional information"
                           value={visitorNotes}
                           onChange={(e) => setVisitorNotes(e.target.value)}
@@ -738,8 +638,8 @@ export default function VisitorsPage() {
                       </div>
                     </div>
                     <DialogFooter>
-                      <Button
-                        variant="outline"
+                      <Button 
+                        variant="outline" 
                         onClick={() => {
                           resetForm()
                           setIsSchedulingVisit(false)

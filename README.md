@@ -75,6 +75,29 @@ ElderlyCare-/
 
 ---
 
+## 🏃 Quick Start (How to Run the App)
+
+### 1. Run the Backend
+Open a terminal in the project root:
+```bash
+cd backend
+# Activate the existing virtual environment!
+.\.venv\Scripts\activate
+# Start the server
+python app.py
+```
+*(If you see `ModuleNotFoundError`, it means your virtual environment was not activated. Make sure you run `.\.venv\Scripts\activate` first!)*
+
+### 2. Run the Frontend
+Open a new terminal in the project root:
+```bash
+cd frontend
+npm install --legacy-peer-deps
+npm run dev
+```
+
+---
+
 ## 🚀 Getting Started
 
 ### Prerequisites

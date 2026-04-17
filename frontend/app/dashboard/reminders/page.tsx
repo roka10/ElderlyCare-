@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { DashboardLayout } from "@/components/dashboard-layout"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -22,73 +22,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/hooks/use-toast"
-
-type Reminder = {
-  id: number
-  title: string
-  description: string
-  time: string
-  frequency: string
-  alexa: boolean
-  completed: boolean
-  date?: string
-}
-
-const initialReminders: Reminder[] = [
-  {
-    id: 1,
-    title: "Blood Pressure Medication",
-    description: "Take 1 pill with water",
-    time: "9:00 AM",
-    frequency: "Daily",
-    alexa: true,
-    completed: true,
-  },
-  {
-    id: 2,
-    title: "Heart Medication",
-    description: "Take 1 pill after lunch",
-    time: "1:00 PM",
-    frequency: "Daily",
-    alexa: true,
-    completed: false,
-  },
-  {
-    id: 3,
-    title: "Evening Medication",
-    description: "Take 1 pill before dinner",
-    time: "6:00 PM",
-    frequency: "Daily",
-    alexa: true,
-    completed: false,
-  },
-  {
-    id: 4,
-    title: "Doctor Appointment",
-    description: "Checkup with Dr. Johnson",
-    time: "3:30 PM",
-    frequency: "Once",
-    date: "Tomorrow",
-    alexa: true,
-    completed: false,
-  },
-  {
-    id: 5,
-    title: "Physical Therapy",
-    description: "Gentle stretching exercises",
-    time: "10:00 AM",
-    frequency: "Weekly",
-    date: "Every Monday",
-    alexa: true,
-    completed: false,
-  },
-]
+import { Reminder, useReminders } from "@/lib/data/reminders"
 
 export default function RemindersPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [isAddingReminder, setIsAddingReminder] = useState(false)
-  const [reminders, setReminders] = useState<Reminder[]>(initialReminders)
-  const [editingReminderId, setEditingReminderId] = useState<number | null>(null)
+  const { data: reminders, isLoading, error, addReminder, updateReminder, deleteReminder } = useReminders()
+  const [editingReminderId, setEditingReminderId] = useState<string | null>(null)
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
   const [time, setTime] = useState("")
@@ -123,7 +63,7 @@ export default function RemindersPage() {
     setIsAddingReminder(true)
   }
 
-  const handleSaveReminder = () => {
+  const handleSaveReminder = async () => {
     if (!title.trim() || !time) {
       toast({
         title: "Missing information",
@@ -133,78 +73,96 @@ export default function RemindersPage() {
       return
     }
 
-    if (editingReminderId === null) {
-      const newReminder: Reminder = {
-        id: Date.now(),
-        title,
-        description,
-        time,
-        frequency,
-        date: date || undefined,
-        alexa: alexaEnabled,
-        completed: false,
+    try {
+      if (editingReminderId === null) {
+        await addReminder({
+          title,
+          description,
+          time,
+          frequency,
+          date: date || undefined,
+          alexa: alexaEnabled,
+          completed: false,
+        })
+        toast({
+          title: "Reminder added",
+          description: `"${title}" has been created.`,
+        })
+      } else {
+        await updateReminder(editingReminderId, {
+          title,
+          description,
+          time,
+          frequency,
+          date: date || undefined,
+          alexa: alexaEnabled,
+        })
+        toast({
+          title: "Reminder updated",
+          description: `"${title}" has been updated.`,
+        })
       }
-      setReminders((prev) => [...prev, newReminder])
+    } catch (e: any) {
       toast({
-        title: "Reminder added",
-        description: `"${title}" has been created.`,
+        title: "Save failed",
+        description: e?.message ?? "Could not save reminder.",
+        variant: "destructive",
       })
-    } else {
-      setReminders((prev) =>
-        prev.map((reminder) =>
-          reminder.id === editingReminderId
-            ? {
-                ...reminder,
-                title,
-                description,
-                time,
-                frequency,
-                date: date || undefined,
-                alexa: alexaEnabled,
-              }
-            : reminder,
-        ),
-      )
-      toast({
-        title: "Reminder updated",
-        description: `"${title}" has been updated.`,
-      })
+      return
     }
 
     setIsAddingReminder(false)
     resetForm()
   }
 
-  const handleToggleComplete = (id: number) => {
-    setReminders((prev) =>
-      prev.map((reminder) =>
-        reminder.id === id ? { ...reminder, completed: !reminder.completed } : reminder,
-      ),
+  const handleToggleComplete = async (id: string, completed: boolean) => {
+    try {
+      await updateReminder(id, { completed: !completed })
+    } catch (e: any) {
+      toast({
+        title: "Update failed",
+        description: e?.message ?? "Could not update reminder.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleDeleteReminder = async (id: string, reminderTitle?: string) => {
+    try {
+      await deleteReminder(id)
+      toast({
+        title: "Reminder deleted",
+        description: reminderTitle ? `"${reminderTitle}" has been removed.` : "Reminder removed.",
+      })
+    } catch (e: any) {
+      toast({
+        title: "Delete failed",
+        description: e?.message ?? "Could not delete reminder.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleRestoreReminder = async (id: string) => {
+    try {
+      await updateReminder(id, { completed: false })
+    } catch (e: any) {
+      toast({
+        title: "Restore failed",
+        description: e?.message ?? "Could not restore reminder.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const filteredReminders = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) return reminders
+    return reminders.filter(
+      (reminder) =>
+        reminder.title.toLowerCase().includes(q) || reminder.description.toLowerCase().includes(q),
     )
-  }
-
-  const handleDeleteReminder = (id: number) => {
-    const toDelete = reminders.find((r) => r.id === id)
-    setReminders((prev) => prev.filter((reminder) => reminder.id !== id))
-    toast({
-      title: "Reminder deleted",
-      description: toDelete ? `"${toDelete.title}" has been removed.` : "Reminder removed.",
-    })
-  }
-
-  const handleRestoreReminder = (id: number) => {
-    setReminders((prev) =>
-      prev.map((reminder) =>
-        reminder.id === id ? { ...reminder, completed: false } : reminder,
-      ),
-    )
-  }
-
-  const filteredReminders = reminders.filter(
-    (reminder) =>
-      reminder.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      reminder.description.toLowerCase().includes(searchQuery.toLowerCase()),
-  )
+  }, [reminders, searchQuery])
 
   const todayReminders = filteredReminders.filter((r) => !r.date)
   const upcomingReminders = filteredReminders.filter((r) => r.date)
@@ -354,7 +312,11 @@ export default function RemindersPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {todayReminders.length === 0 ? (
+                  {isLoading ? (
+                    <div className="text-center py-8 text-sm text-muted-foreground">Loading reminders...</div>
+                  ) : error ? (
+                    <div className="text-center py-8 text-sm text-destructive">{error}</div>
+                  ) : todayReminders.length === 0 ? (
                     <div className="text-center py-4">
                       <Bell className="h-8 w-8 mx-auto text-muted-foreground" />
                       <p className="mt-2 text-muted-foreground">No reminders for today</p>
@@ -406,7 +368,7 @@ export default function RemindersPage() {
                               variant="outline"
                               size="sm"
                               className="gap-1"
-                              onClick={() => handleToggleComplete(reminder.id)}
+                              onClick={() => handleToggleComplete(reminder.id, reminder.completed)}
                             >
                               <Check className="h-3 w-3" />
                               Complete
@@ -415,7 +377,11 @@ export default function RemindersPage() {
                           <Button variant="ghost" size="icon" onClick={() => openEditDialog(reminder)}>
                             <Edit className="h-4 w-4" />
                           </Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleDeleteReminder(reminder.id)}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDeleteReminder(reminder.id, reminder.title)}
+                          >
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
@@ -441,7 +407,11 @@ export default function RemindersPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {upcomingReminders.length === 0 ? (
+                  {isLoading ? (
+                    <div className="text-center py-8 text-sm text-muted-foreground">Loading reminders...</div>
+                  ) : error ? (
+                    <div className="text-center py-8 text-sm text-destructive">{error}</div>
+                  ) : upcomingReminders.length === 0 ? (
                     <div className="text-center py-4">
                       <Calendar className="h-8 w-8 mx-auto text-muted-foreground" />
                       <p className="mt-2 text-muted-foreground">No upcoming reminders</p>
@@ -475,10 +445,14 @@ export default function RemindersPage() {
                           </div>
                         </div>
                         <div className="flex gap-2">
-                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(reminder)}>
+                          <Button variant="ghost" size="icon" onClick={() => openEditDialog(reminder)}>
                             <Edit className="h-4 w-4" />
                           </Button>
-                            <Button variant="ghost" size="icon" onClick={() => handleDeleteReminder(reminder.id)}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDeleteReminder(reminder.id, reminder.title)}
+                          >
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
@@ -498,7 +472,11 @@ export default function RemindersPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {reminders.filter((r) => r.completed).length === 0 ? (
+                  {isLoading ? (
+                    <div className="text-center py-8 text-sm text-muted-foreground">Loading reminders...</div>
+                  ) : error ? (
+                    <div className="text-center py-8 text-sm text-destructive">{error}</div>
+                  ) : reminders.filter((r) => r.completed).length === 0 ? (
                     <div className="text-center py-4">
                       <Check className="h-8 w-8 mx-auto text-muted-foreground" />
                       <p className="mt-2 text-muted-foreground">No completed reminders</p>
@@ -538,7 +516,11 @@ export default function RemindersPage() {
                             <Repeat className="h-3 w-3" />
                             Restore
                           </Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleDeleteReminder(reminder.id)}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDeleteReminder(reminder.id, reminder.title)}
+                          >
                               <Trash2 className="h-4 w-4" />
                             </Button>
                           </div>

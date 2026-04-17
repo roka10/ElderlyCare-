@@ -8,3 +8,4 @@ numpy==1.26.4
 werkzeug
 supabase
 python-dotenv
+mediapipe==0.10.14

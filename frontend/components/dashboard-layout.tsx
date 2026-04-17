@@ -36,8 +36,12 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     { name: "Settings", href: "/dashboard/settings", icon: Settings },
   ]
 
+  // Avoid hydration mismatch for active-link classes:
+  // server render and first client render should compute the same path state.
+  const safePathname = isMounted ? pathname : ""
+
   const NavItem = ({ item, compact = false }: { item: typeof navigation[0]; compact?: boolean }) => {
-    const isActive = pathname === item.href
+    const isActive = safePathname === item.href
     return (
       <Link
         href={item.href}

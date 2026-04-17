@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { DashboardLayout } from "@/components/dashboard-layout"
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
@@ -19,7 +19,7 @@ import {
 import {
   AlertTriangle, Camera, CameraOff, Maximize2, Minimize2,
   PhoneCall, Activity, Smile, PersonStanding, Wifi, WifiOff,
-  UserPlus, Users, Trash2, CheckCircle, Loader2,
+  UserPlus, Users, Trash2, CheckCircle, Loader2, Bone, Footprints,
 } from "lucide-react"
 
 const BACKEND = "http://127.0.0.1:5000"
@@ -31,6 +31,9 @@ interface DetectionState {
   motion: string
   fall: string
   faces_count: number
+  pose_status: string
+  activity: string
+  landmark_count: number
 }
 
 interface AlertEntry {
@@ -54,13 +57,14 @@ export default function LiveFeedPage() {
   const [detection, setDetection] = useState<DetectionState>({
     face_name: "No Face", emotion: "N/A", emotion_confidence: 0,
     motion: "No Motion", fall: "No Fall", faces_count: 0,
+    pose_status: "No Person", activity: "Idle", landmark_count: 0,
   })
   const [alerts, setAlerts] = useState<AlertEntry[]>([])
   const [knownPeople, setKnownPeople] = useState<string[]>([])
   const [showRegister, setShowRegister] = useState(false)
   const [registerName, setRegisterName] = useState("")
   const [registerStatus, setRegisterStatus] = useState<"idle" | "capturing" | "done" | "error">("idle")
-  const alertIdRef = { current: 0 }
+  const alertIdRef = useRef(0)
 
   // ── Fetch known faces ────────────────────────────────────────────────────
   const fetchKnownFaces = useCallback(async () => {
@@ -169,7 +173,7 @@ export default function LiveFeedPage() {
         </div>
 
         {/* ── 4 Detection Cards (always visible) ── */}
-        <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
+        <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
 
           {/* Face ID */}
           <Card className="border-blue-200 dark:border-blue-900">
@@ -194,7 +198,7 @@ export default function LiveFeedPage() {
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
                 <Smile className="h-4 w-4 text-yellow-500" />
-                Emotion Detection
+                Emotion
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -204,18 +208,18 @@ export default function LiveFeedPage() {
               </div>
               <p className="text-xs text-muted-foreground mt-1">
                 {isCameraOn && detection.emotion_confidence > 0
-                  ? `Confidence: ${(detection.emotion_confidence * 100).toFixed(0)}%`
+                  ? `${(detection.emotion_confidence * 100).toFixed(0)}% confidence`
                   : "Camera off"}
               </p>
             </CardContent>
           </Card>
 
-          {/* Motion */}
+          {/* Motion (Landmark-Based) */}
           <Card className="border-purple-200 dark:border-purple-900">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
                 <Activity className="h-4 w-4 text-purple-500" />
-                Motion Detection
+                Motion
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -223,7 +227,43 @@ export default function LiveFeedPage() {
                 {isCameraOn ? detection.motion : "—"}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
-                {isCameraOn ? "Frame-diff tracking active" : "Camera off"}
+                {isCameraOn ? "Landmark tracking (33 pts)" : "Camera off"}
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* Pose Status */}
+          <Card className="border-cyan-200 dark:border-cyan-900">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Bone className="h-4 w-4 text-cyan-500" />
+                Pose
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className={`font-semibold text-lg ${isCameraOn ? (detection.pose_status === "Lying Down" ? "text-red-400" : detection.pose_status === "Sitting" ? "text-amber-400" : "text-cyan-400") : "text-muted-foreground"}`}>
+                {isCameraOn ? (detection.pose_status || "No Person") : "—"}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                {isCameraOn ? `${detection.landmark_count || 0}/33 landmarks` : "Camera off"}
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* Activity */}
+          <Card className="border-indigo-200 dark:border-indigo-900">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Footprints className="h-4 w-4 text-indigo-500" />
+                Activity
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className={`font-semibold text-lg ${isCameraOn ? "text-indigo-400" : "text-muted-foreground"}`}>
+                {isCameraOn ? (detection.activity || "Idle") : "—"}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                {isCameraOn ? "Body posture analysis" : "Camera off"}
               </p>
             </CardContent>
           </Card>
@@ -241,7 +281,7 @@ export default function LiveFeedPage() {
                 {isCameraOn ? detection.fall : "—"}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
-                {isCameraOn ? "Posture-based AI monitoring" : "Camera off"}
+                {isCameraOn ? "Landmark geometry AI" : "Camera off"}
               </p>
             </CardContent>
           </Card>
@@ -253,7 +293,7 @@ export default function LiveFeedPage() {
             <div className="flex items-center gap-2">
               <div className={`h-2.5 w-2.5 rounded-full ${isCameraOn && isConnected ? "bg-green-500 animate-pulse" : "bg-muted-foreground"}`} />
               <span className="text-sm font-medium">
-                {isCameraOn ? (isConnected ? "Live · 4 AI Models Active" : "Connecting…") : "Camera Off"}
+                {isCameraOn ? (isConnected ? "Live · MediaPipe Pose + Emotion + Face AI" : "Connecting…") : "Camera Off"}
               </span>
             </div>
             <div className="flex gap-2">
