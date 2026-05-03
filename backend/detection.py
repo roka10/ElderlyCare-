@@ -56,7 +56,7 @@ class FaceEmotionRecognizer:
         self.fall_detection_active = False
         self.fall_frames_count = 0
         self.last_face_bbox = None
-        self.fall_threshold_aspect_ratio = 1.8 # Ratio of width/height for horizontal bounding box
+        self.fall_threshold_aspect_ratio = 1.2 # Ratio of width/height for horizontal bounding box
 
     def build_and_load_emotion_model(self):
         if not TENSORFLOW_AVAILABLE:

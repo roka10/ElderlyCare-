@@ -54,7 +54,7 @@ export default function DashboardPage() {
 
         {/* Status Overview */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Card>
+          <Card className="animate-in fade-in zoom-in-95 duration-500 delay-100 fill-mode-both hover:shadow-md transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Status</CardTitle>
               <Activity className="h-4 w-4 text-muted-foreground" />
@@ -64,7 +64,7 @@ export default function DashboardPage() {
               <p className="text-xs text-muted-foreground">All systems operational</p>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="animate-in fade-in zoom-in-95 duration-500 delay-150 fill-mode-both hover:shadow-md transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Reminders</CardTitle>
               <Bell className="h-4 w-4 text-muted-foreground" />
@@ -74,7 +74,7 @@ export default function DashboardPage() {
               <p className="text-xs text-muted-foreground">Upcoming today</p>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="animate-in fade-in zoom-in-95 duration-500 delay-200 fill-mode-both hover:shadow-md transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Visitors</CardTitle>
               <Users className="h-4 w-4 text-muted-foreground" />
@@ -84,7 +84,7 @@ export default function DashboardPage() {
               <p className="text-xs text-muted-foreground">Expected today</p>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="animate-in fade-in zoom-in-95 duration-500 delay-300 fill-mode-both hover:shadow-md transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Tasks</CardTitle>
               <Calendar className="h-4 w-4 text-muted-foreground" />

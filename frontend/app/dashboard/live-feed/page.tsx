@@ -94,7 +94,10 @@ export default function LiveFeedPage() {
         setDetection(data)
 
         // Auto-generate alerts
-        if (data.fall.includes("FALL")) addAlert("fall", `⚠️ FALL DETECTED!`)
+        if (data.fall.includes("FALL")) {
+          const personStr = data.face_name !== "No Face" && data.face_name !== "Unknown" ? data.face_name : "Someone"
+          addAlert("fall", `⚠️ FALL DETECTED: ${personStr} has fallen!`)
+        }
         if (data.motion === "Motion Detected" && data.faces_count === 0)
           addAlert("motion", "Motion without visible person")
         if (data.face_name === "Unknown" && data.faces_count > 0)
@@ -176,7 +179,7 @@ export default function LiveFeedPage() {
         <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
 
           {/* Face ID */}
-          <Card className="border-blue-200 dark:border-blue-900">
+          <Card className="border-blue-200 dark:border-blue-900 animate-in fade-in zoom-in-95 duration-500 delay-100 fill-mode-both hover:shadow-md transition-all hover:-translate-y-1">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
                 <PersonStanding className="h-4 w-4 text-blue-500" />
@@ -194,7 +197,7 @@ export default function LiveFeedPage() {
           </Card>
 
           {/* Emotion */}
-          <Card className="border-yellow-200 dark:border-yellow-900">
+          <Card className="border-yellow-200 dark:border-yellow-900 animate-in fade-in zoom-in-95 duration-500 delay-150 fill-mode-both hover:shadow-md transition-all hover:-translate-y-1">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
                 <Smile className="h-4 w-4 text-yellow-500" />
@@ -215,7 +218,7 @@ export default function LiveFeedPage() {
           </Card>
 
           {/* Motion (Landmark-Based) */}
-          <Card className="border-purple-200 dark:border-purple-900">
+          <Card className="border-purple-200 dark:border-purple-900 animate-in fade-in zoom-in-95 duration-500 delay-200 fill-mode-both hover:shadow-md transition-all hover:-translate-y-1">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
                 <Activity className="h-4 w-4 text-purple-500" />
@@ -233,7 +236,7 @@ export default function LiveFeedPage() {
           </Card>
 
           {/* Pose Status */}
-          <Card className="border-cyan-200 dark:border-cyan-900">
+          <Card className="border-cyan-200 dark:border-cyan-900 animate-in fade-in zoom-in-95 duration-500 delay-300 fill-mode-both hover:shadow-md transition-all hover:-translate-y-1">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
                 <Bone className="h-4 w-4 text-cyan-500" />
@@ -251,7 +254,7 @@ export default function LiveFeedPage() {
           </Card>
 
           {/* Activity */}
-          <Card className="border-indigo-200 dark:border-indigo-900">
+          <Card className="border-indigo-200 dark:border-indigo-900 animate-in fade-in zoom-in-95 duration-500 delay-500 fill-mode-both hover:shadow-md transition-all hover:-translate-y-1">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
                 <Footprints className="h-4 w-4 text-indigo-500" />
@@ -269,7 +272,7 @@ export default function LiveFeedPage() {
           </Card>
 
           {/* Fall */}
-          <Card className={`${detection.fall.includes("FALL") && isCameraOn ? "border-red-500 bg-red-50 dark:bg-red-950/20" : "border-green-200 dark:border-green-900"}`}>
+          <Card className={`${detection.fall.includes("FALL") && isCameraOn ? "border-red-500 bg-red-50 dark:bg-red-950/20" : "border-green-200 dark:border-green-900"} animate-in fade-in zoom-in-95 duration-500 delay-700 fill-mode-both hover:shadow-md transition-all hover:-translate-y-1`}>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
                 <AlertTriangle className={`h-4 w-4 ${detection.fall.includes("FALL") && isCameraOn ? "text-red-500 animate-pulse" : "text-green-500"}`} />
@@ -288,12 +291,12 @@ export default function LiveFeedPage() {
         </div>
 
         {/* ── Video Stream ── */}
-        <Card className="overflow-hidden">
+        <Card className="overflow-hidden animate-in fade-in slide-in-from-bottom-8 duration-700 delay-300 fill-mode-both shadow-lg hover:shadow-xl transition-shadow border-primary/10">
           <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/40">
             <div className="flex items-center gap-2">
               <div className={`h-2.5 w-2.5 rounded-full ${isCameraOn && isConnected ? "bg-green-500 animate-pulse" : "bg-muted-foreground"}`} />
               <span className="text-sm font-medium">
-                {isCameraOn ? (isConnected ? "Live · MediaPipe Pose + Emotion + Face AI" : "Connecting…") : "Camera Off"}
+                {isCameraOn ? (isConnected ? "Live" : "Connecting…") : "Camera Off"}
               </span>
             </div>
             <div className="flex gap-2">
@@ -377,7 +380,7 @@ export default function LiveFeedPage() {
               )}
               {detection.fall.includes("FALL") && isCameraOn && (
                 <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-red-600 text-white font-bold px-6 py-2 rounded-full text-sm animate-bounce shadow-lg">
-                  ⚠️ FALL DETECTED — CHECK IMMEDIATELY
+                  ⚠️ FALL DETECTED — CHECK {detection.face_name !== "No Face" && detection.face_name !== "Unknown" ? detection.face_name.toUpperCase() : "IMMEDIATELY"}
                 </div>
               )}
             </div>

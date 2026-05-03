@@ -103,7 +103,7 @@ def recognize_face(frame, face_location, known_encodings, known_names):
         return "Error"
 
 # Fall detection function
-def detect_fall(face_bbox, fall_state, fall_threshold_ratio=1.8, fall_frames_threshold=15):
+def detect_fall(face_bbox, fall_state, fall_threshold_ratio=1.2, fall_frames_threshold=15):
     """Detect falls based on face bounding box aspect ratio"""
     if face_bbox is None:
         fall_state['active'] = False

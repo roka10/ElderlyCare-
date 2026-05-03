@@ -145,20 +145,21 @@ def _download_model(url, path, label):
         except Exception as e:
             print(f"[{label}] Download failed: {e}")
 
-_download_model(YUNET_URL, YUNET_MODEL_PATH, "YuNet")
-_download_model(SFACE_URL, SFACE_MODEL_PATH, "SFace")
-
 yunet = None
 sface = None
-try:
-    yunet = cv2.FaceDetectorYN_create(YUNET_MODEL_PATH, "", (320, 320))
-    sface = cv2.FaceRecognizerSF_create(SFACE_MODEL_PATH, "")
-    print("[Face] YuNet + SFace models loaded successfully.")
-except Exception as e:
-    print(f"[Face] YuNet/SFace init failed: {e}")
-
 known_face_embeddings = {}
 face_lock  = threading.Lock()
+
+def init_face_models():
+    global yunet, sface
+    _download_model(YUNET_URL, YUNET_MODEL_PATH, "YuNet")
+    _download_model(SFACE_URL, SFACE_MODEL_PATH, "SFace")
+    try:
+        yunet = cv2.FaceDetectorYN_create(YUNET_MODEL_PATH, "", (320, 320))
+        sface = cv2.FaceRecognizerSF_create(SFACE_MODEL_PATH, "")
+        print("[Face] YuNet + SFace models loaded successfully.")
+    except Exception as e:
+        print(f"[Face] YuNet/SFace init failed: {e}")
 
 def train_faces():
     """Extract deep CNN features for all users using SFace."""
@@ -325,6 +326,8 @@ class LandmarkMotionDetector:
         self.fall_frame_count = 0
         self.prev_nose_y = None             # for rapid nose drop detection
         self.prev_nose_time = None
+        self.prev_hip_y = None              # for rapid hip drop detection
+        self.prev_hip_time = None
         # Motion smoothing
         self.motion_history = []            # last N motion magnitudes
 
@@ -332,7 +335,7 @@ class LandmarkMotionDetector:
         """Convert a normalised landmark to pixel coords."""
         return int(lm.x * w), int(lm.y * h)
 
-    def _visible(self, lm, threshold=0.5):
+    def _visible(self, lm, threshold=0.3):
         """Return True if the landmark visibility is above threshold."""
         return lm.visibility > threshold
 
@@ -384,7 +387,7 @@ class LandmarkMotionDetector:
         }
         for name, idx in key_indices.items():
             lm = lms[idx]
-            if self._visible(lm, 0.4):
+            if self._visible(lm, 0.3):
                 kp[name] = self._landmark_to_px(lm, frame_w, frame_h)
 
         # ── Motion detection via landmark displacement ────────────────────────
@@ -458,10 +461,10 @@ class LandmarkMotionDetector:
                     width_to_height = 0
 
                 # Classify posture
-                if torso_height < 30:
+                if torso_height < 50:
                     # Very short torso -- likely lying down (horizontal)
                     posture = "Lying Down"
-                elif width_to_height > 0.7:
+                elif width_to_height > 0.5:
                     # Wide relative to tall -- horizontal
                     posture = "Lying Down"
                 elif knee_y is not None and ankle_y is not None:
@@ -502,7 +505,7 @@ class LandmarkMotionDetector:
                                 self.fall_active = True
                                 result["is_fall"] = True
                                 self.fall_cooldown_until = now + 5.0
-                                print("[FALL] FALL DETECTED via lying posture!")
+                                print(f"[FALL] FALL DETECTED via lying posture! (width/height: {width_to_height:.2f} > 0.5 or torso_height: {torso_height:.1f} < 50)")
                     else:
                         self.fall_frame_count = max(self.fall_frame_count - 1, 0)
                         if self.fall_frame_count <= 0:
@@ -515,28 +518,44 @@ class LandmarkMotionDetector:
                             dt = now - self.prev_nose_time
                             if 0.05 < dt < 1.5:
                                 drop = (nose_y - self.prev_nose_y) / frame_h
-                                # Head dropped > 30% of frame height rapidly
-                                if drop > 0.30:
+                                # Head dropped > 10% of frame height rapidly
+                                if drop > 0.10:
                                     if not self.fall_active:
                                         self.fall_active = True
                                         result["is_fall"] = True
                                         self.fall_cooldown_until = now + 5.0
-                                        print("[FALL] FALL DETECTED via rapid nose drop!")
+                                        print(f"[FALL] FALL DETECTED via rapid nose drop! (drop ratio: {drop:.2f} > 0.10)")
                         self.prev_nose_y = nose_y
                         self.prev_nose_time = now
 
-                    # -- Signal 3: Body height collapsed > 40% in < 2s --
+                    # -- Signal 3: Body height collapsed > 15% in < 2s --
                     if len(self.standing_height_history) >= 2 and not self.fall_active:
                         oldest_t, oldest_bh, _ = self.standing_height_history[0]
                         newest_t, newest_bh, _ = self.standing_height_history[-1]
                         dt = newest_t - oldest_t
-                        if 0.2 < dt < 2.0 and oldest_bh > 50:
+                        if 0.2 < dt < 2.0 and oldest_bh > 40:
                             height_drop = (oldest_bh - newest_bh) / oldest_bh
-                            if height_drop > 0.40:
+                            if height_drop > 0.15:
                                 self.fall_active = True
                                 result["is_fall"] = True
                                 self.fall_cooldown_until = now + 5.0
-                                print("[FALL] FALL DETECTED via body height collapse!")
+                                print(f"[FALL] FALL DETECTED via body height collapse! (height_drop: {height_drop:.2f} > 0.15)")
+                                
+                    # -- Signal 4: Rapid Hip Drop (Center of gravity falls fast) --
+                    if "left_hip" in kp and "right_hip" in kp and not self.fall_active:
+                        mid_hip_y = (kp["left_hip"][1] + kp["right_hip"][1]) / 2.0
+                        if self.prev_hip_y is not None and self.prev_hip_time is not None:
+                            dt = now - self.prev_hip_time
+                            if 0.05 < dt < 1.5:
+                                drop = (mid_hip_y - self.prev_hip_y) / frame_h
+                                if drop > 0.12: # hip dropped > 12% of frame height rapidly
+                                    if not self.fall_active:
+                                        self.fall_active = True
+                                        result["is_fall"] = True
+                                        self.fall_cooldown_until = now + 5.0
+                                        print(f"[FALL] FALL DETECTED via rapid hip drop! (drop ratio: {drop:.2f} > 0.12)")
+                        self.prev_hip_y = mid_hip_y
+                        self.prev_hip_time = now
                 else:
                     self.fall_active = False
                     self.fall_frame_count = 0
@@ -578,10 +597,9 @@ class LandmarkMotionDetector:
 
 # ─── Background Initialization ────────────────────────────────────────────────
 def init_all():
+    init_face_models()
     load_emotion_model()
     sync_from_supabase()   # fetches DB + extracts SFace embeddings
-
-threading.Thread(target=init_all, daemon=True).start()
 
 # ─── Supabase Storage Helpers ──────────────────────────────────────────────────
 def upload_to_supabase_storage(local_path: str, storage_path: str):
@@ -637,11 +655,11 @@ def generate_frames():
     # Per-generator MediaPipe Pose instance (not threadsafe across generators)
     pose = mp_pose.Pose(
         static_image_mode=False,
-        model_complexity=1,
+        model_complexity=0,
         smooth_landmarks=True,
         enable_segmentation=False,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5,
+        min_detection_confidence=0.3,
+        min_tracking_confidence=0.3,
     )
     motion_detector = LandmarkMotionDetector()
 
@@ -1059,4 +1077,9 @@ def on_disconnect():
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
+        
+    # Start background initialization only in the worker process (not the reloader watcher)
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.config.get("DEBUG", False):
+        threading.Thread(target=init_all, daemon=True).start()
+        
     socketio.run(app, debug=True, host="0.0.0.0", port=5000, allow_unsafe_werkzeug=True)
