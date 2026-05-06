@@ -627,6 +627,18 @@ def delete_from_supabase_storage(storage_path: str):
     except Exception as e:
         print(f"[Supabase Storage] Delete failed: {e}")
 
+# ─── Liveness (Blink Detection) ───────────────────────────────────────────────
+def calculate_ear(landmarks, indices, w, h):
+    pts = [(landmarks.landmark[idx].x * w, landmarks.landmark[idx].y * h) for idx in indices]
+    v1 = math.hypot(pts[1][0] - pts[5][0], pts[1][1] - pts[5][1])
+    v2 = math.hypot(pts[2][0] - pts[4][0], pts[2][1] - pts[4][1])
+    h1 = math.hypot(pts[0][0] - pts[3][0], pts[0][1] - pts[3][1])
+    if h1 == 0: return 0.0
+    return (v1 + v2) / (2.0 * h1)
+
+LEFT_EYE_INDICES  = [33, 160, 158, 133, 153, 144]
+RIGHT_EYE_INDICES = [362, 385, 387, 263, 373, 380]
+
 # ─── Frame Generator (MediaPipe Pose + Simultaneous Emotion) ──────────────────
 EMOTION_COLORS = {
     "Happy":    (0, 255, 255),  "Sad":      (255, 80, 80),
@@ -646,11 +658,10 @@ EMOTION_INTERVAL     = 0.3   # emotion detection frequency (seconds) — near-si
 
 def generate_frames():
     my_gen = camera_generation   # snapshot — if this changes, we must exit
-    last_emotion_time = 0.0
     last_emit_time    = 0.0
-    last_recog_time   = 0.0
     frame_count       = 0
     cached_faces      = []
+    tracked_faces     = []
 
     # Per-generator MediaPipe Pose instance (not threadsafe across generators)
     pose = mp_pose.Pose(
@@ -661,7 +672,14 @@ def generate_frames():
         min_detection_confidence=0.3,
         min_tracking_confidence=0.3,
     )
+    face_mesh = mp_face_mesh.FaceMesh(
+        max_num_faces=1,
+        refine_landmarks=True,
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.5
+    )
     motion_detector = LandmarkMotionDetector()
+    is_live = False
 
     while camera_active and camera_generation == my_gen:
         t_start = time.time()
@@ -677,196 +695,274 @@ def generate_frames():
         h_frame, w_frame = display.shape[:2]
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        # ══════════════════════════════════════════════════════════════════════
-        # 1. MediaPipe Pose – landmark-based motion & fall detection
-        # ══════════════════════════════════════════════════════════════════════
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        pose_results = pose.process(rgb_frame)
+        try:
+                # ══════════════════════════════════════════════════════════════════════
+            # 1. MediaPipe Pose – landmark-based motion & fall detection
+            # ══════════════════════════════════════════════════════════════════════
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pose_results = pose.process(rgb_frame)
 
-        pose_analysis = motion_detector.analyse(
-            pose_results.pose_landmarks, w_frame, h_frame
-        )
-
-        # Draw custom skeleton with highlighted fingertips and motion points
-        if pose_results.pose_landmarks:
-            lms = pose_results.pose_landmarks.landmark
-            PL = mp_pose.PoseLandmark
-
-            # First draw all connections as thin lines
-            mp_drawing.draw_landmarks(
-                display,
-                pose_results.pose_landmarks,
-                mp_pose.POSE_CONNECTIONS,
-                landmark_drawing_spec=mp_drawing.DrawingSpec(color=(40, 40, 40), thickness=1, circle_radius=0),
-                connection_drawing_spec=mp_drawing.DrawingSpec(color=(0, 200, 200), thickness=2),
+            pose_analysis = motion_detector.analyse(
+                pose_results.pose_landmarks, w_frame, h_frame
             )
 
-            # -- Color map by body region --
-            # Fingertips (red, large)  |  Wrists/Ankles (yellow)
-            # Elbows/Knees (green)     |  Shoulders/Hips (cyan)
-            # Face/Nose (white)        |  Feet (orange)
-            landmark_styles = {
-                # Fingertips & thumbs -- RED, big circles
-                PL.LEFT_INDEX:   {"color": (0, 0, 255),   "radius": 7, "label": ""},
-                PL.RIGHT_INDEX:  {"color": (0, 0, 255),   "radius": 7, "label": ""},
-                PL.LEFT_PINKY:   {"color": (200, 0, 255), "radius": 6, "label": ""},
-                PL.RIGHT_PINKY:  {"color": (200, 0, 255), "radius": 6, "label": ""},
-                PL.LEFT_THUMB:   {"color": (0, 100, 255), "radius": 6, "label": ""},
-                PL.RIGHT_THUMB:  {"color": (0, 100, 255), "radius": 6, "label": ""},
-                # Wrists -- YELLOW
-                PL.LEFT_WRIST:   {"color": (0, 255, 255), "radius": 6, "label": "W"},
-                PL.RIGHT_WRIST:  {"color": (0, 255, 255), "radius": 6, "label": "W"},
-                # Elbows -- GREEN
-                PL.LEFT_ELBOW:   {"color": (0, 255, 0),   "radius": 5, "label": ""},
-                PL.RIGHT_ELBOW:  {"color": (0, 255, 0),   "radius": 5, "label": ""},
-                # Shoulders -- CYAN
-                PL.LEFT_SHOULDER:  {"color": (255, 255, 0), "radius": 6, "label": "S"},
-                PL.RIGHT_SHOULDER: {"color": (255, 255, 0), "radius": 6, "label": "S"},
-                # Hips -- CYAN
-                PL.LEFT_HIP:     {"color": (255, 200, 0), "radius": 6, "label": "H"},
-                PL.RIGHT_HIP:    {"color": (255, 200, 0), "radius": 6, "label": "H"},
-                # Knees -- GREEN
-                PL.LEFT_KNEE:    {"color": (0, 255, 100), "radius": 5, "label": "K"},
-                PL.RIGHT_KNEE:   {"color": (0, 255, 100), "radius": 5, "label": "K"},
-                # Ankles -- YELLOW
-                PL.LEFT_ANKLE:   {"color": (0, 220, 255), "radius": 6, "label": "A"},
-                PL.RIGHT_ANKLE:  {"color": (0, 220, 255), "radius": 6, "label": "A"},
-                # Feet -- ORANGE
-                PL.LEFT_HEEL:    {"color": (0, 140, 255), "radius": 4, "label": ""},
-                PL.RIGHT_HEEL:   {"color": (0, 140, 255), "radius": 4, "label": ""},
-                PL.LEFT_FOOT_INDEX:  {"color": (0, 165, 255), "radius": 5, "label": ""},
-                PL.RIGHT_FOOT_INDEX: {"color": (0, 165, 255), "radius": 5, "label": ""},
-                # Nose -- WHITE
-                PL.NOSE:         {"color": (255, 255, 255), "radius": 5, "label": ""},
-            }
+            # Draw custom skeleton with highlighted fingertips and motion points
+            if pose_results.pose_landmarks:
+                lms = pose_results.pose_landmarks.landmark
+                PL = mp_pose.PoseLandmark
 
-            # Draw each landmark with its custom style
-            for lm_id, style in landmark_styles.items():
-                lm = lms[lm_id]
-                if lm.visibility > 0.4:
-                    px = int(lm.x * w_frame)
-                    py = int(lm.y * h_frame)
-                    # Filled circle
-                    cv2.circle(display, (px, py), style["radius"], style["color"], -1)
-                    # Thin border for contrast
-                    cv2.circle(display, (px, py), style["radius"], (0, 0, 0), 1)
-                    # Optional label
-                    if style["label"]:
-                        cv2.putText(display, style["label"], (px + style["radius"] + 2, py + 4),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1)
+                # First draw all connections as thin lines
+                mp_drawing.draw_landmarks(
+                    display,
+                    pose_results.pose_landmarks,
+                    mp_pose.POSE_CONNECTIONS,
+                    landmark_drawing_spec=mp_drawing.DrawingSpec(color=(40, 40, 40), thickness=1, circle_radius=0),
+                    connection_drawing_spec=mp_drawing.DrawingSpec(color=(0, 200, 200), thickness=2),
+                )
 
-        is_motion = pose_analysis["motion"]
-        is_fall   = pose_analysis["is_fall"]
-        motion_status = "Motion Detected" if is_motion else "No Motion"
-        fall_status = "FALL DETECTED!" if is_fall else "No Fall"
-        if not is_fall and motion_detector.fall_frame_count > 3:
-            fall_status = "Possible Fall"
+                # -- Color map by body region --
+                # Fingertips (red, large)  |  Wrists/Ankles (yellow)
+                # Elbows/Knees (green)     |  Shoulders/Hips (cyan)
+                # Face/Nose (white)        |  Feet (orange)
+                landmark_styles = {
+                    # Fingertips & thumbs -- RED, big circles
+                    PL.LEFT_INDEX:   {"color": (0, 0, 255),   "radius": 7, "label": ""},
+                    PL.RIGHT_INDEX:  {"color": (0, 0, 255),   "radius": 7, "label": ""},
+                    PL.LEFT_PINKY:   {"color": (200, 0, 255), "radius": 6, "label": ""},
+                    PL.RIGHT_PINKY:  {"color": (200, 0, 255), "radius": 6, "label": ""},
+                    PL.LEFT_THUMB:   {"color": (0, 100, 255), "radius": 6, "label": ""},
+                    PL.RIGHT_THUMB:  {"color": (0, 100, 255), "radius": 6, "label": ""},
+                    # Wrists -- YELLOW
+                    PL.LEFT_WRIST:   {"color": (0, 255, 255), "radius": 6, "label": "W"},
+                    PL.RIGHT_WRIST:  {"color": (0, 255, 255), "radius": 6, "label": "W"},
+                    # Elbows -- GREEN
+                    PL.LEFT_ELBOW:   {"color": (0, 255, 0),   "radius": 5, "label": ""},
+                    PL.RIGHT_ELBOW:  {"color": (0, 255, 0),   "radius": 5, "label": ""},
+                    # Shoulders -- CYAN
+                    PL.LEFT_SHOULDER:  {"color": (255, 255, 0), "radius": 6, "label": "S"},
+                    PL.RIGHT_SHOULDER: {"color": (255, 255, 0), "radius": 6, "label": "S"},
+                    # Hips -- CYAN
+                    PL.LEFT_HIP:     {"color": (255, 200, 0), "radius": 6, "label": "H"},
+                    PL.RIGHT_HIP:    {"color": (255, 200, 0), "radius": 6, "label": "H"},
+                    # Knees -- GREEN
+                    PL.LEFT_KNEE:    {"color": (0, 255, 100), "radius": 5, "label": "K"},
+                    PL.RIGHT_KNEE:   {"color": (0, 255, 100), "radius": 5, "label": "K"},
+                    # Ankles -- YELLOW
+                    PL.LEFT_ANKLE:   {"color": (0, 220, 255), "radius": 6, "label": "A"},
+                    PL.RIGHT_ANKLE:  {"color": (0, 220, 255), "radius": 6, "label": "A"},
+                    # Feet -- ORANGE
+                    PL.LEFT_HEEL:    {"color": (0, 140, 255), "radius": 4, "label": ""},
+                    PL.RIGHT_HEEL:   {"color": (0, 140, 255), "radius": 4, "label": ""},
+                    PL.LEFT_FOOT_INDEX:  {"color": (0, 165, 255), "radius": 5, "label": ""},
+                    PL.RIGHT_FOOT_INDEX: {"color": (0, 165, 255), "radius": 5, "label": ""},
+                    # Nose -- WHITE
+                    PL.NOSE:         {"color": (255, 255, 255), "radius": 5, "label": ""},
+                }
 
-        # ══════════════════════════════════════════════════════════════════════
-        # 2. Face detection (YuNet DNN, every Nth frame for speed)
-        # ══════════════════════════════════════════════════════════════════════
-        frame_count += 1
-        if frame_count % FACE_DETECT_INTERVAL == 0 and yunet is not None:
-            yunet.setInputSize((w_frame, h_frame))
-            _, _cached_faces = yunet.detect(frame)
-            if _cached_faces is not None:
-                cached_faces = _cached_faces
-            else:
-                cached_faces = []
+                # Draw each landmark with its custom style
+                for lm_id, style in landmark_styles.items():
+                    lm = lms[lm_id]
+                    if lm.visibility > 0.4:
+                        px = int(lm.x * w_frame)
+                        py = int(lm.y * h_frame)
+                        # Filled circle
+                        cv2.circle(display, (px, py), style["radius"], style["color"], -1)
+                        # Thin border for contrast
+                        cv2.circle(display, (px, py), style["radius"], (0, 0, 0), 1)
+                        # Optional label
+                        if style["label"]:
+                            cv2.putText(display, style["label"], (px + style["radius"] + 2, py + 4),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1)
 
-        faces       = cached_faces
-        faces_count = len(faces)
+            is_motion = pose_analysis["motion"]
+            is_fall   = pose_analysis["is_fall"]
+            motion_status = "Motion Detected" if is_motion else "No Motion"
+            fall_status = "FALL DETECTED!" if is_fall else "No Fall"
+            if not is_fall and motion_detector.fall_frame_count > 3:
+                fall_status = "Possible Fall"
 
-        now = time.time()
-        with state_lock:
-            current_emotion  = detection_state["emotion"]
-            current_emo_conf = detection_state["emotion_confidence"]
-            current_name     = detection_state["face_name"]
+            # ══════════════════════════════════════════════════════════════════════
+            # 1.5 MediaPipe Face Mesh – Liveness Detection (Blink)
+            # ══════════════════════════════════════════════════════════════════════
+            mesh_results = face_mesh.process(rgb_frame)
+            if mesh_results.multi_face_landmarks:
+                landmarks = mesh_results.multi_face_landmarks[0]
+                left_ear = calculate_ear(landmarks, LEFT_EYE_INDICES, w_frame, h_frame)
+                right_ear = calculate_ear(landmarks, RIGHT_EYE_INDICES, w_frame, h_frame)
+                ear = (left_ear + right_ear) / 2.0
+                if ear < 0.22 and not is_live:
+                    is_live = True
+                    for tf in tracked_faces:
+                        tf['last_recog'] = 0.0  # force immediate recognition
 
-        # ══════════════════════════════════════════════════════════════════════
-        # 3. SIMULTANEOUS Emotion Detection (every EMOTION_INTERVAL seconds)
-        # ══════════════════════════════════════════════════════════════════════
-        if faces_count > 0 and (now - last_emotion_time) > EMOTION_INTERVAL:
-            face_data = faces[0]
-            fx, fy, fw, fh = map(lambda x: max(0, int(x)), face_data[:4])
-            emo, emo_conf  = detect_emotion_dnn(frame[fy:fy+fh, fx:fx+fw])
-            current_emotion, current_emo_conf = emo, emo_conf
+            # ══════════════════════════════════════════════════════════════════════
+            # 2. Face detection (YuNet DNN, every Nth frame for speed)
+            # ══════════════════════════════════════════════════════════════════════
+            frame_count += 1
+            if frame_count % FACE_DETECT_INTERVAL == 0 and yunet is not None:
+                yunet.setInputSize((w_frame, h_frame))
+                _, _cached_faces = yunet.detect(frame)
+                if _cached_faces is not None:
+                    cached_faces = _cached_faces
+                else:
+                    cached_faces = []
+
+            faces       = cached_faces
+            faces_count = len(faces)
+            if faces_count == 0:
+                is_live = False
+                tracked_faces = []
+
+            now = time.time()
+
+            # Update tracked faces (Simple distance-based tracking)
+            new_tracked = []
+            for face_data in faces:
+                fx, fy, fw, fh = map(lambda x: max(0, int(x)), face_data[:4])
+                cx, cy = fx + fw/2, fy + fh/2
+            
+                best_match = None
+                best_dist = float('inf')
+                for tf in tracked_faces:
+                    dist = math.hypot(cx - tf['cx'], cy - tf['cy'])
+                    if dist < 100 and dist < best_dist:
+                        best_match = tf
+                        best_dist = dist
+                    
+                if best_match:
+                    best_match['face_data'] = np.array(face_data, copy=True, dtype=np.float32)
+                    best_match['box'] = (fx, fy, fw, fh)
+                    best_match['cx'], best_match['cy'] = cx, cy
+                    new_tracked.append(best_match)
+                    tracked_faces.remove(best_match)
+                else:
+                    new_tracked.append({
+                        'face_data': np.array(face_data, copy=True, dtype=np.float32),
+                        'box': (fx, fy, fw, fh),
+                        'cx': cx, 'cy': cy,
+                        'name': 'Unknown',
+                        'emotion': 'N/A',
+                        'emo_conf': 0.0,
+                        'last_recog': 0.0,
+                        'last_emo': 0.0
+                    })
+            tracked_faces = new_tracked
+
+            # ══════════════════════════════════════════════════════════════════════
+            # 3. SIMULTANEOUS Emotion Detection & Face Recognition (Per Face)
+            # ══════════════════════════════════════════════════════════════════════
+            emotion_processed_this_frame = False
+            recog_processed_this_frame = False
+            
+            for tf in tracked_faces:
+                fx, fy, fw, fh = tf['box']
+            
+                # Emotion
+                if not emotion_processed_this_frame and (now - tf['last_emo'] > EMOTION_INTERVAL):
+                    if fw > 0 and fh > 0 and fy+fh <= h_frame and fx+fw <= w_frame:
+                        emo, emo_conf = detect_emotion_dnn(frame[fy:fy+fh, fx:fx+fw])
+                        tf['emotion'] = emo
+                        tf['emo_conf'] = emo_conf
+                    tf['last_emo'] = now
+                    emotion_processed_this_frame = True
+                
+                # Identity
+                if not recog_processed_this_frame and (now - tf['last_recog'] > 2.0):
+                    name, _ = recognize_face(frame, tf['face_data'])
+                    if not is_live and name != "Unknown":
+                        name = "Spoof / Photo"
+                    tf['name'] = name
+                    tf['last_recog'] = now
+                    recog_processed_this_frame = True
+
+            # Update global state for Dashboard
             with state_lock:
-                detection_state["emotion"]            = emo
-                detection_state["emotion_confidence"] = emo_conf
-            last_emotion_time = now
+                if tracked_faces:
+                    detection_state["emotion"] = tracked_faces[0]['emotion']
+                    detection_state["emotion_confidence"] = tracked_faces[0]['emo_conf']
+                    
+                    # Extract unique names and join them
+                    names = []
+                    for tf in tracked_faces:
+                        if tf['name'] not in names:
+                            names.append(tf['name'])
+                    detection_state["face_name"] = ", ".join(names)
+                else:
+                    detection_state["emotion"] = "N/A"
+                    detection_state["emotion_confidence"] = 0.0
+                    detection_state["face_name"] = "No Face"
 
-        # Face recognition (throttled — every 2s, heavier compute)
-        if faces_count > 0 and (now - last_recog_time) > 2.0:
-            face_data = faces[0]
-            name, _ = recognize_face(frame, face_data)
+            # ── Draw face boxes ──
+            for tf in tracked_faces:
+                fx, fy, fw, fh = tf['box']
+                fname = tf['name']
+                femo = tf['emotion']
+                fconf = tf['emo_conf']
+            
+                box_color = EMOTION_COLORS.get(femo, (0, 255, 0))
+                cv2.rectangle(display, (fx, fy), (fx+fw, fy+fh), box_color, 2)
+                label_y = max(fy - 10, 20)
+                (tw, th), _ = cv2.getTextSize(fname, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+                cv2.rectangle(display, (fx, label_y-th-6), (fx+tw+8, label_y+4), (0,0,0), -1)
+                cv2.putText(display, fname, (fx+4, label_y),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, box_color, 2)
+                emo_text = f"{femo} {int(fconf*100)}%"
+                cv2.rectangle(display, (fx, fy+fh), (fx+fw, fy+fh+28), (0,0,0), -1)
+                cv2.putText(display, emo_text, (fx+4, fy+fh+20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 1)
+
+            # ── Update shared state ──
             with state_lock:
-                detection_state["face_name"] = name
-            current_name = name
-            last_recog_time = now
+                detection_state["motion"]         = motion_status
+                detection_state["fall"]           = fall_status
+                detection_state["faces_count"]    = faces_count
+                detection_state["pose_status"]    = pose_analysis["posture"]
+                detection_state["activity"]       = pose_analysis["activity"]
+                detection_state["landmark_count"] = pose_analysis["landmark_count"]
 
-        if faces_count == 0:
-            with state_lock:
-                detection_state["emotion"]   = "N/A"
-                detection_state["face_name"] = "No Face"
-            current_emotion, current_name = "N/A", "No Face"
+            # ── HUD overlay ──
+            overlay = display.copy()
+            cv2.rectangle(overlay, (0, 0), (380, 185), (20,20,20), -1)
+            cv2.addWeighted(overlay, 0.55, display, 0.45, 0, display)
 
-        # ── Draw face boxes ──
-        box_color = EMOTION_COLORS.get(current_emotion, (0, 255, 0))
-        for face_data in faces:
-            fx, fy, fw, fh = map(int, face_data[:4])
-            cv2.rectangle(display, (fx, fy), (fx+fw, fy+fh), box_color, 2)
-            label_y = max(fy - 10, 20)
-            name_text = current_name
-            (tw, th), _ = cv2.getTextSize(name_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
-            cv2.rectangle(display, (fx, label_y-th-6), (fx+tw+8, label_y+4), (0,0,0), -1)
-            cv2.putText(display, name_text, (fx+4, label_y),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, box_color, 2)
-            emo_text = f"{current_emotion} {int(current_emo_conf*100)}%"
-            cv2.rectangle(display, (fx, fy+fh), (fx+fw, fy+fh+28), (0,0,0), -1)
-            cv2.putText(display, emo_text, (fx+4, fy+fh+20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 1)
+            m_color = (0,210,255) if is_motion else (100,255,100)
+            cv2.putText(display, f"Motion  : {motion_status}", (10,24),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, m_color, 2)
+            f_color = (0,0,255) if "FALL" in fall_status else (100,255,100)
+            cv2.putText(display, f"Fall    : {fall_status}", (10,50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, f_color, 2)
+            cv2.putText(display, f"Posture : {pose_analysis['posture']}", (10,76),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,200,0), 2)
+            cv2.putText(display, f"Activity: {pose_analysis['activity']}", (10,102),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200,180,255), 2)
+            cv2.putText(display, f"Faces   : {faces_count}", (10,128),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,220,0), 2)
+        
+            l_color = (0,255,0) if is_live else (0,0,255)
+            l_text = "Live" if is_live else "Spoof (Blink to verify)"
+            if faces_count == 0: l_text = "N/A"
+            cv2.putText(display, f"Liveness: {l_text}", (10,154),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, l_color, 2)
+            cv2.putText(display, f"Landmarks: {pose_analysis['landmark_count']}/33", (10,180),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,255,200), 2)
 
-        # ── Update shared state ──
-        with state_lock:
-            detection_state["motion"]         = motion_status
-            detection_state["fall"]           = fall_status
-            detection_state["faces_count"]    = faces_count
-            detection_state["pose_status"]    = pose_analysis["posture"]
-            detection_state["activity"]       = pose_analysis["activity"]
-            detection_state["landmark_count"] = pose_analysis["landmark_count"]
+            if "FALL" in fall_status:
+                banner = "!! FALL DETECTED - CHECK IMMEDIATELY !!"
+                (bw, bh), _ = cv2.getTextSize(banner, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
+                bx = max((w_frame-bw)//2, 0)
+                cv2.rectangle(display, (bx-10, 8), (bx+bw+10, bh+24), (0,0,200), -1)
+                cv2.putText(display, banner, (bx, bh+16), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
 
-        # ── HUD overlay ──
-        overlay = display.copy()
-        cv2.rectangle(overlay, (0, 0), (380, 160), (20,20,20), -1)
-        cv2.addWeighted(overlay, 0.55, display, 0.45, 0, display)
+            # ── Throttle socket.io emissions ──
+            if (now - last_emit_time) > EMIT_INTERVAL:
+                socketio.emit("detection_update", {**detection_state})
+                last_emit_time = now
 
-        m_color = (0,210,255) if is_motion else (100,255,100)
-        cv2.putText(display, f"Motion  : {motion_status}", (10,24),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, m_color, 2)
-        f_color = (0,0,255) if "FALL" in fall_status else (100,255,100)
-        cv2.putText(display, f"Fall    : {fall_status}", (10,50),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, f_color, 2)
-        cv2.putText(display, f"Posture : {pose_analysis['posture']}", (10,76),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,200,0), 2)
-        cv2.putText(display, f"Activity: {pose_analysis['activity']}", (10,102),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200,180,255), 2)
-        cv2.putText(display, f"Faces   : {faces_count}", (10,128),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,220,0), 2)
-        cv2.putText(display, f"Landmarks: {pose_analysis['landmark_count']}/33", (10,154),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,255,200), 2)
-
-        if "FALL" in fall_status:
-            banner = "!! FALL DETECTED - CHECK IMMEDIATELY !!"
-            (bw, bh), _ = cv2.getTextSize(banner, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
-            bx = max((w_frame-bw)//2, 0)
-            cv2.rectangle(display, (bx-10, 8), (bx+bw+10, bh+24), (0,0,200), -1)
-            cv2.putText(display, banner, (bx, bh+16), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
-
-        # ── Throttle socket.io emissions ──
-        if (now - last_emit_time) > EMIT_INTERVAL:
-            socketio.emit("detection_update", {**detection_state})
-            last_emit_time = now
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            cv2.putText(display, f"ERROR: {str(e)}", (10, h_frame - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+            pass
 
         # ── Encode + yield the frame ──
         ret, buf = cv2.imencode(".jpg", display, [cv2.IMWRITE_JPEG_QUALITY, 65])
@@ -881,6 +977,7 @@ def generate_frames():
 
     # Cleanup MediaPipe resources when generator exits
     pose.close()
+    face_mesh.close()
 
 
 # ─── API Routes ────────────────────────────────────────────────────────────────
@@ -1041,6 +1138,18 @@ def get_known_faces():
     # Local fallback
     people = [d for d in os.listdir(KNOWN_FACES_DIR) if os.path.isdir(os.path.join(KNOWN_FACES_DIR, d))]
     return jsonify({"people": [{"name": p} for p in sorted(people)]}), 200
+
+
+from flask import send_from_directory
+import os
+
+@app.route("/known_faces/<name>/photo", methods=["GET"])
+def get_known_face_photo(name):
+    """Serve the local photo.jpg for a known person."""
+    person_dir = os.path.join(KNOWN_FACES_DIR, name)
+    if os.path.exists(os.path.join(person_dir, "photo.jpg")):
+        return send_from_directory(person_dir, "photo.jpg")
+    return jsonify({"error": "Photo not found"}), 404
 
 
 @app.route("/delete_face/<name>", methods=["DELETE"])

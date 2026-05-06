@@ -60,25 +60,10 @@ export default function LiveFeedPage() {
     pose_status: "No Person", activity: "Idle", landmark_count: 0,
   })
   const [alerts, setAlerts] = useState<AlertEntry[]>([])
-  const [knownPeople, setKnownPeople] = useState<string[]>([])
   const [showRegister, setShowRegister] = useState(false)
   const [registerName, setRegisterName] = useState("")
   const [registerStatus, setRegisterStatus] = useState<"idle" | "capturing" | "done" | "error">("idle")
   const alertIdRef = useRef(0)
-
-  // ── Fetch known faces ────────────────────────────────────────────────────
-  const fetchKnownFaces = useCallback(async () => {
-    try {
-      const res = await fetch(`${BACKEND}/known_faces`)
-      if (res.ok) {
-        const data = await res.json()
-        const names = (data.people || []).map((p: any) => typeof p === 'string' ? p : p.name)
-        setKnownPeople(names)
-      }
-    } catch { /* offline */ }
-  }, [])
-
-  useEffect(() => { fetchKnownFaces() }, [fetchKnownFaces])
 
   // ── Poll detection status ────────────────────────────────────────────────
   useEffect(() => {
@@ -100,7 +85,7 @@ export default function LiveFeedPage() {
         }
         if (data.motion === "Motion Detected" && data.faces_count === 0)
           addAlert("motion", "Motion without visible person")
-        if (data.face_name === "Unknown" && data.faces_count > 0)
+        if (data.face_name.includes("Unknown") && data.faces_count > 0)
           addAlert("face", "Unknown person detected in frame")
       } catch { setIsConnected(false) }
     }, 1000)
@@ -128,7 +113,6 @@ export default function LiveFeedPage() {
       })
       if (res.ok) {
         setRegisterStatus("done")
-        await fetchKnownFaces()
         setTimeout(() => { setShowRegister(false); setRegisterName(""); setRegisterStatus("idle") }, 2000)
       } else {
         setRegisterStatus("error")
@@ -136,13 +120,6 @@ export default function LiveFeedPage() {
     } catch {
       setRegisterStatus("error")
     }
-  }
-
-  async function handleDeleteFace(name: string) {
-    try {
-      await fetch(`${BACKEND}/delete_face/${encodeURIComponent(name)}`, { method: "DELETE" })
-      await fetchKnownFaces()
-    } catch { /* offline */ }
   }
 
   // ── UI helpers ───────────────────────────────────────────────────────────
@@ -387,49 +364,8 @@ export default function LiveFeedPage() {
           </CardContent>
         </Card>
 
-        {/* ── Bottom Row: Known People + Live Alerts ── */}
-        <div className="grid gap-4 md:grid-cols-2">
-
-          {/* Known People */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Users className="h-5 w-5 text-blue-500" /> Registered Faces
-              </CardTitle>
-              <CardDescription>
-                People the system will recognise in the live feed
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {knownPeople.length === 0 ? (
-                <div className="text-center py-6 space-y-3">
-                  <p className="text-sm text-muted-foreground">No faces registered yet</p>
-                  <Button size="sm" variant="outline" className="gap-2"
-                    onClick={() => { setShowRegister(true); setRegisterStatus("idle") }}>
-                    <UserPlus className="h-4 w-4" /> Register First Person
-                  </Button>
-                </div>
-              ) : (
-                <ul className="space-y-2">
-                  {knownPeople.map(name => (
-                    <li key={name} className="flex items-center justify-between p-2 rounded-lg bg-muted/50">
-                      <div className="flex items-center gap-2">
-                        <div className="h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center text-sm font-bold text-blue-600 dark:text-blue-300">
-                          {name[0]?.toUpperCase()}
-                        </div>
-                        <span className="font-medium">{name}</span>
-                      </div>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-700"
-                        onClick={() => handleDeleteFace(name)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-
+        {/* ── Bottom Row: Live Alerts ── */}
+        <div className="grid gap-4">
           {/* Live Alerts */}
           <Card>
             <CardHeader>
@@ -444,14 +380,22 @@ export default function LiveFeedPage() {
               ) : (
                 <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
                   {alerts.map(alert => (
-                    <div key={alert.id} className="flex items-start gap-3">
-                      <div className={`p-2 rounded-full flex-shrink-0 ${alert.type === "fall" ? "bg-red-500/10" : alert.type === "face" ? "bg-amber-500/10" : "bg-blue-500/10"}`}>
-                        <AlertTriangle className={`h-4 w-4 ${alert.type === "fall" ? "text-red-500" : alert.type === "face" ? "text-amber-500" : "text-blue-500"}`} />
+                    <div key={alert.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/50">
+                      <div className="flex items-start gap-3">
+                        <div className={`p-2 rounded-full flex-shrink-0 ${alert.type === "fall" ? "bg-red-500/10" : alert.type === "face" ? "bg-amber-500/10" : "bg-blue-500/10"}`}>
+                          <AlertTriangle className={`h-4 w-4 ${alert.type === "fall" ? "text-red-500" : alert.type === "face" ? "text-amber-500" : "text-blue-500"}`} />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium">{alert.message}</p>
+                          <p className="text-xs text-muted-foreground">{alert.time}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-sm font-medium">{alert.message}</p>
-                        <p className="text-xs text-muted-foreground">{alert.time}</p>
-                      </div>
+                      {alert.type === "face" && alert.message.includes("Unknown person") && (
+                        <Button size="sm" variant="default" className="h-8 text-xs gap-1.5" onClick={() => { setShowRegister(true); setRegisterStatus("idle"); }}>
+                          <UserPlus className="h-3 w-3" />
+                          Register Face
+                        </Button>
+                      )}
                     </div>
                   ))}
                 </div>

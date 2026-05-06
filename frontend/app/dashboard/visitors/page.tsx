@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { DashboardLayout } from "@/components/dashboard-layout"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -24,6 +24,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { toast } from "@/components/ui/use-toast"
 
+const BACKEND = "http://127.0.0.1:5000"
+
 interface UpcomingVisit {
   id: number
   name: string
@@ -46,56 +48,13 @@ export default function VisitorsPage() {
   const [visitDate, setVisitDate] = useState("")
   const [visitTime, setVisitTime] = useState("")
 
-  const initialKnownVisitors = [
-    {
-      id: 1,
-      name: "Sarah Johnson",
-      role: "Nurse",
-      status: "approved",
-      lastVisit: "Today, 9:45 AM",
-      image: "/placeholder.svg?height=40&width=40",
-    },
-    {
-      id: 2,
-      name: "Dr. Michael Chen",
-      role: "Doctor",
-      status: "approved",
-      lastVisit: "Yesterday, 3:30 PM",
-      image: "/placeholder.svg?height=40&width=40",
-    },
-    {
-      id: 3,
-      name: "Emma Wilson",
-      role: "Family",
-      status: "approved",
-      lastVisit: "3 days ago",
-      image: "/placeholder.svg?height=40&width=40",
-    },
-    {
-      id: 4,
-      name: "Robert Davis",
-      role: "Caregiver",
-      status: "approved",
-      lastVisit: "1 week ago",
-      image: "/placeholder.svg?height=40&width=40",
-    },
-    {
-      id: 5,
-      name: "Lisa Thompson",
-      role: "Friend",
-      status: "approved",
-      lastVisit: "2 weeks ago",
-      image: "/placeholder.svg?height=40&width=40",
-    },
-  ]
-
   const initialUnknownVisitors = [
     { id: 101, timestamp: "Today, 11:23 AM", status: "unidentified", image: "/placeholder.svg?height=40&width=40" },
     { id: 102, timestamp: "Yesterday, 4:15 PM", status: "unidentified", image: "/placeholder.svg?height=40&width=40" },
     { id: 103, timestamp: "3 days ago", status: "delivery", image: "/placeholder.svg?height=40&width=40" },
   ]
 
-  const [knownVisitors, setKnownVisitors] = useState(initialKnownVisitors)
+  const [knownVisitors, setKnownVisitors] = useState<any[]>([])
   const [unknownVisitors, setUnknownVisitors] = useState(initialUnknownVisitors)
   const [upcomingVisits, setUpcomingVisits] = useState<UpcomingVisit[]>([
     {
@@ -123,6 +82,31 @@ export default function VisitorsPage() {
       image: "/placeholder.svg?height=40&width=40",
     },
   ])
+
+  // Fetch known visitors from backend
+  const fetchKnownVisitors = async () => {
+    try {
+      const res = await fetch(`${BACKEND}/known_faces`)
+      if (res.ok) {
+        const data = await res.json()
+        const formatted = data.people.map((person: any, index: number) => ({
+          id: index,
+          name: person.name,
+          role: person.relationship || "Guest",
+          status: "approved",
+          lastVisit: new Date(person.created_at).toLocaleDateString(),
+          image: person.photo_url || `${BACKEND}/known_faces/${encodeURIComponent(person.name)}/photo`,
+        }))
+        setKnownVisitors(formatted)
+      }
+    } catch (error) {
+      console.warn("Backend is offline. Could not fetch visitors.")
+    }
+  }
+
+  useEffect(() => {
+    fetchKnownVisitors()
+  }, [])
 
   const resetForm = () => {
     setVisitorName("")
@@ -214,13 +198,31 @@ export default function VisitorsPage() {
     })
   }
 
-  const handleDeleteKnownVisitor = (id: number) => {
-    const toDelete = knownVisitors.find((v) => v.id === id)
-    setKnownVisitors((prev) => prev.filter((v) => v.id !== id))
-    toast({
-      title: "Visitor removed",
-      description: toDelete ? `${toDelete.name} has been removed from known visitors.` : "Visitor removed.",
-    })
+  const handleDeleteKnownVisitor = async (id: number, name: string) => {
+    try {
+      const res = await fetch(`${BACKEND}/delete_face/${encodeURIComponent(name)}`, {
+        method: "DELETE"
+      })
+      if (res.ok) {
+        setKnownVisitors((prev) => prev.filter((v) => v.id !== id))
+        toast({
+          title: "Visitor removed",
+          description: `${name} has been removed from known visitors.`,
+        })
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to remove visitor.",
+          variant: "destructive"
+        })
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to remove visitor.",
+        variant: "destructive"
+      })
+    }
   }
 
   const handleAddUnknownToKnown = (id: number) => {
@@ -451,7 +453,7 @@ export default function VisitorsPage() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => handleDeleteKnownVisitor(visitor.id)}
+                            onClick={() => handleDeleteKnownVisitor(visitor.id, visitor.name)}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
